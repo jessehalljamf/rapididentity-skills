@@ -8,6 +8,8 @@ tools, or when converting action sets between XML (file mode) and JSON (API mode
 - Editing Existing Action Sets via MCP — canonical-body method, the 400/500 failures, fallback
 - JSON Object Model — file JSON vs API JSON, argDef/action/arg shapes
 - XML ↔ JSON Conversion — field-by-field mapping in both directions
+- JSON Builtins (parseJSON / toJSON) - native values, key ordering, malformed handling, json() globals
+- MCP Authoring Hazards - nested-if hoist bug, save/run timeouts, run-only-saved
 
 ---
 
@@ -355,3 +357,67 @@ XML file.
 **Output format:** Apply all standard XML format rules from § XML Format Rules — no `<?xml`
 declaration, no indentation, single-line compact output, all sections with
 `suppressTrace="true"`.
+
+---
+
+## JSON Builtins — parseJSON / toJSON (object model)
+
+`parseJSON(json)` and `toJSON(item, indent?)` are built-in **actions** (each takes an `outputVar`).
+`toJSON` is also callable inline as an expression function (e.g. the httpPOST body). They live in
+the platform `json-actions.js` and are the preferred replacements for `JSON.parse` / `JSON.stringify`.
+
+- **`parseJSON` returns native JS values** - objects (dot/bracket/nested access), real arrays
+  (`Array.isArray` true; `.length`, indexing, `.map`, arithmetic), top-level scalars
+  (`parseJSON('42')` -> number), `null`, and preserved unicode. Seed an empty object with
+  `parseJSON('{}')`.
+- **Malformed input does not abort** - `parseJSON` auto-logs its own ERROR (json-actions.js) and
+  returns `undefined`. Pre-gate with an `isValidJSON` (try/catch around native `JSON.parse`) guard
+  when you need clean branching without the noisy auto-error.
+- **`toJSON` is the type-agnostic serializer** - `toJSON(item)` compact, `toJSON(item, true)`
+  4-space indented. Handles plain objects, accumulated objects, and `createRecord` Records. (The old
+  `JSON.stringify` StackOverflow warning is type-specific to live Java-wrapped objects.)
+- **Key ordering** - `createRecord` Records serialise alphabetically (TreeMap-like); plain and
+  `parseJSON`-seeded objects keep insertion order. Numbers normalise (`1234`, not `1234.0`).
+- **Record-concat gotcha** - `"" + record` yields a Java map `toString`
+  (`{employeeNumber=1234.0, ...}`), not JSON. Use `toJSON(record)`.
+- **`json()`-wrapped SharedGlobals are pre-parsed** - `Global.<key>` for a `json([...])` /
+  `json({...})` value is already a native array/object; never `parseJSON` / `JSON.parse` it (that
+  stringifies then throws `SyntaxError`). Parsing is only for raw JSON strings (HTTP bodies, file
+  reads, string-typed args).
+
+---
+
+## MCP Authoring Hazards (observed on jar 2026.05.0)
+
+### Trailing siblings after a mid-block nested `if` are hoisted (compile break)
+
+When a `then` / `else` / `do` actions array contains a nested `if` (or `while`) that is **not the
+last element**, the `save-connect-action` round-trip hoists the actions that follow it up onto the
+parent `if` as bare `{"name":"<action>"}` stubs (no `args`, no `id`). The set then fails to compile:
+
+```
+java.lang.IllegalArgumentException: Error compiling action set 'X': Can't redefine property 'if.setRecordFieldValue'
+    at net.idauto.exodus.dss.ActionCompiler.getCoreArgs
+    at net.idauto.exodus.dss.ActionCompiler.compileIf
+```
+
+Workarounds (any one):
+1. Make the nested `if` / `while` the **last** element of its container.
+2. Replace mid-block branching with flat ternary `setVariable` expressions (parseJSON gives native
+   values, so type/shape decisions collapse into ternaries).
+3. Push the post-branch logic **into** each branch so nothing trails the nested control-flow action.
+
+Detection (Python, before saving): walk every `then` / `else` / `do` actions array and assert no
+element of `name` `if` / `while` appears at an index other than the last.
+
+### A client timeout does not mean the save failed
+
+`save-connect-action` / `run-connect-action` can hang the MCP client (multi-minute timeout) while
+the server keeps working; the write may still commit. **Always re-fetch and confirm the `version`
+incremented** before re-saving. Never blind-retry a save (risks node-id collisions / duplicates).
+
+### Run only saved action sets
+
+Running a bare, unsaved `section` / action inline via `run-connect-action` throws
+`NullPointerException` in `ActionCompiler.compileActionDef`. Save the action set first, then run it
+by name (`{name, project, id, args}`).

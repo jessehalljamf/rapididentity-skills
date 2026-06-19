@@ -46,7 +46,7 @@ doing any design or editing work.
 | Need | Go to |
 |---|---|
 | XML format rules, root element, quoting, metacharacter escaping | § XML Format Rules |
-| setVariable expression compiler rules, JSON strings, StackOverflow avoidance | § setVariable Expression Compiler Rules |
+| JSON serialise / parse - `toJSON` (out) and `parseJSON`; key ordering, malformed handling | § Serialising structured data / § Parsing JSON |
 | String escapes (`\\`, `\"`, `\n`, `\t`, `\uXXXX`) | § setVariable Expression Compiler Rules |
 | setVariable vs copyRecord — reference vs deep copy, array mutation rule | § setVariable vs copyRecord |
 | Naming (prefixes, camelCase, reserved labels) | § Naming Scheme |
@@ -55,7 +55,7 @@ doing any design or editing work.
 | Logging — built-in `log` action | § Logging |
 | Counting — variable-based counters | § Counting |
 | Control flow — forEach, if/while, break, labeled loops/continue | § Control Flow |
-| JavaScript & engine idioms — arrow fns, named fns, Set, filter, stringify | § JavaScript & Engine Idioms |
+| JavaScript & engine idioms — arrow fns, named fns, Set, filter, toJSON/parseJSON | § JavaScript & Engine Idioms |
 | Try/Catch — error handling via a JS function | § Try/Catch |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
@@ -199,36 +199,67 @@ Delimiter choice is therefore a **readability** preference, not a correctness on
 single-quote delimiters avoid the `\&quot;` noise for strings containing double quotes (e.g. JSON
 keys: prefer `'&quot;groups&quot;:'` over `&quot;\&quot;groups\&quot;:&quot;`).
 
-### Serialising structured data — use JSON.stringify
+### Serialising structured data - use the `toJSON` action
 
-Any time you need a variable to hold a JSON-serialised object or array, use `JSON.stringify` on
-a **fresh single-object literal** in the same expression. Never accumulate properties on an object
-across multiple `setVariable` calls and then pass the accumulated object to `JSON.stringify` — the
-Rhino engine adds internal scope references to the object with each assignment, causing
-`NativeJSON.str` to recurse infinitely and throw a `java.lang.StackOverflowError`.
+To turn an object, array, or Record into a JSON string, use the built-in **`toJSON`** action -
+not `JSON.stringify`. `toJSON(item)` produces compact JSON; `toJSON(item, true)` produces 4-space
+indented output (the replacement for `JSON.stringify(obj, null, 4)`). `toJSON` is the
+type-agnostic serializer: it handles plain objects, `createRecord` Records, and objects built up
+across multiple `setVariable` / `setRecordFieldValue` calls - no concatenation gymnastics required.
+
+`toJSON` is available **both** as an action (with `outputVar`, shown below) and inline as an
+expression function (e.g. `toJSON({...})`, as used in the httpPOST body in § HTTP Actions). The
+action form is the general-purpose pattern; use whichever reads cleanly.
 
 ```xml
-<!-- WRONG: accumulate then stringify → StackOverflowError on large objects -->
-<action name="setVariable"><arg name="name" value="obj"/><arg name="value" value="{}"/></action>
-<action name="setVariable"><arg name="name" value="obj.a"/><arg name="value" value="&quot;foo&quot;"/></action>
-<action name="setVariable"><arg name="name" value="obj.b"/><arg name="value" value="&quot;bar&quot;"/></action>
-<action name="setVariable"><arg name="name" value="result"/><arg name="value" value="JSON.stringify(obj)"/></action>
-
-<!-- RIGHT: stringify a fresh inline literal — safe, one call, no scope leak -->
-<action name="setVariable">
-  <arg name="name" value="result"/>
-  <arg name="value" value="JSON.stringify({&quot;a&quot;:&quot;foo&quot;,&quot;b&quot;:&quot;bar&quot;})"/>
-</action>
+<!-- compact -->
+<action name="toJSON" outputVar="result"><arg name="item" value="obj"/></action>
+<!-- 4-space indented -->
+<action name="toJSON" outputVar="resultPretty"><arg name="item" value="obj"/><arg name="indent" value="true"/></action>
 ```
 
-### Building large JSON strings — string concatenation pattern
+Key ordering: a `createRecord` Record serialises with its keys **alphabetically sorted**; a plain
+object or a `parseJSON`-seeded object keeps **insertion order**. Numbers normalise (`1234`, not
+`1234.0`).
 
-When you need to produce a large JSON string (e.g. a manifest with 35 sections), build it by
-concatenating pre-serialised string fragments rather than assembling one large object:
+Do **not** build JSON by concatenating a Record into text - `&quot;&quot; + record` yields a Java map
+`toString` (`{employeeNumber=1234.0, givenName=Jesse}`: `=`, no quotes, Java double), which is not
+valid JSON. Use `toJSON(record)`.
 
-1. **Per-entry**: `JSON.stringify` on one small flat object per entry → store in an accumulator string
-2. **Separator**: use `','` (single-quote delimiter, no escaping needed)
-3. **Wrapper**: assemble with string concatenation using `[parts].join(',')` or `'{' + ... + '}'`
+> **StackOverflow caveat (corrected).** Earlier guidance said accumulating properties and then
+> calling `JSON.stringify(obj)` always throws `java.lang.StackOverflowError` (Rhino `NativeJSON.str`
+> recursion). In practice this is **type-specific**: it can occur with live Java-wrapped objects
+> (directory / LDAP result objects), but plain Records and `parseJSON`-seeded objects serialise
+> cleanly. The durable rule is simply **use `toJSON`** - it is safe regardless of object type.
+
+### Parsing JSON - use the `parseJSON` action
+
+To turn a JSON **string** into a value, use the built-in **`parseJSON`** action (not `JSON.parse`).
+It returns fully native JS values:
+
+- objects (dot / bracket / nested access all work)
+- real arrays (`Array.isArray` is true; `.length`, indexing, `.map`, `.filter`, arithmetic work)
+- top-level scalars (`parseJSON('42')` -> number, `parseJSON('&quot;x&quot;')` -> string, `parseJSON('true')` -> boolean)
+- `null`, with unicode preserved
+
+```xml
+<action name="parseJSON" outputVar="parsed"><arg name="json" value="payload"/></action>
+```
+
+Seed an empty object with `parseJSON('{}')` (sidesteps the bare `{}` literal compile error).
+
+**Malformed input does not abort the set.** `parseJSON` on invalid JSON auto-logs its own ERROR
+line (from the platform `json-actions.js`) and returns `undefined` - it does not throw. To branch
+cleanly without that noisy auto-error, pre-gate with the `isValidJSON` guard (see § Try/Catch).
+
+**Do not parse what is already parsed.** `json()`-wrapped SharedGlobals and action-set args typed
+as `object` arrive as native values; `parseJSON` / `JSON.parse` is only for raw JSON *strings*
+(HTTP response bodies, file reads, string-typed args). See § Global Properties.
+
+### Building large JSON strings (legacy fallback)
+
+Prefer building a Record/object and calling `toJSON`. The string-concatenation pattern below is a
+**fallback** for assembling already-serialised fragments or when you must control exact byte output.
 
 ```xml
 <!-- Step 1: init accumulator -->
@@ -237,13 +268,13 @@ concatenating pre-serialised string fragments rather than assembling one large o
 <!-- Step 2: first entry (no leading comma) -->
 <action name="setVariable">
   <arg name="name" value="sectionsStr"/>
-  <arg name="value" value="'&quot;sectionKey&quot;:' + JSON.stringify({&quot;label&quot;:&quot;My Label&quot;,&quot;rowCount&quot;:counts.myKey})"/>
+  <arg name="value" value="'&quot;sectionKey&quot;:' + toJSON({label: &quot;My Label&quot;, rowCount: counts.myKey})"/>
 </action>
 
-<!-- Step 3: subsequent entries (prepend comma with single-quote string) -->
+<!-- Step 3: subsequent entries (prepend comma) -->
 <action name="setVariable">
   <arg name="name" value="sectionsStr"/>
-  <arg name="value" value="sectionsStr + ',' + '&quot;nextKey&quot;:' + JSON.stringify({&quot;label&quot;:&quot;Next Label&quot;,&quot;rowCount&quot;:counts.nextKey})"/>
+  <arg name="value" value="sectionsStr + ',' + '&quot;nextKey&quot;:' + toJSON({label: &quot;Next Label&quot;, rowCount: counts.nextKey})"/>
 </action>
 
 <!-- Step 4: wrap in outer structure via array join -->
@@ -253,38 +284,18 @@ concatenating pre-serialised string fragments rather than assembling one large o
 </action>
 ```
 
-### Arrays and nested objects inside JSON.stringify
-
-When a `JSON.stringify` call needs to include an array of string keys, write it inline as a
-JS array literal — this is safe inside `JSON.stringify(...)` because it's not a bare expression:
-
-```xml
-<!-- Safe: array literal inside JSON.stringify -->
-<action name="setVariable">
-  <arg name="name" value="groupJSON"/>
-  <arg name="value" value="JSON.stringify({&quot;id&quot;:&quot;myGroup&quot;,&quot;sections&quot;:[&quot;key1&quot;,&quot;key2&quot;,&quot;key3&quot;]})"/>
-</action>
-```
-
-For multiple sibling objects (e.g. an array of groups), serialise each individually then
-concatenate with `'['` / `']'` wrappers:
-
-```xml
-<action name="setVariable"><arg name="name" value="g1"/><arg name="value" value="JSON.stringify({&quot;id&quot;:&quot;group1&quot;,&quot;sections&quot;:[&quot;a&quot;,&quot;b&quot;]})"/></action>
-<action name="setVariable"><arg name="name" value="g2"/><arg name="value" value="JSON.stringify({&quot;id&quot;:&quot;group2&quot;,&quot;sections&quot;:[&quot;c&quot;,&quot;d&quot;]})"/></action>
-<action name="setVariable"><arg name="name" value="groupsArray"/><arg name="value" value="'[' + g1 + ',' + g2 + ']'"/></action>
-```
-
 ### Summary table
 
 | Situation | Correct approach |
 |---|---|
+| Serialise any object / array / Record | `toJSON(obj)` (action with `outputVar`, or inline) |
+| Pretty / indented output | `toJSON(obj, true)` - 4-space indent |
+| Parse a JSON string | `parseJSON(str)` (action) - returns a native value |
+| Seed an empty object | `parseJSON('{}')` |
+| Reference a `json()` Global | `Global.X` directly - already native, never parse |
+| Accumulated object -> serialise | `toJSON(obj)` (overflow risk is specific to Java-wrapped objects, not plain Records) |
+| Assemble pre-serialised fragments | String-concatenation fallback (above) |
 | String constant containing `"` | Single-quote outer delimiter: `'&quot;key&quot;:value'` |
-| Serialise a small flat object | `JSON.stringify({&quot;k&quot;:&quot;v&quot;,...})` inline |
-| Serialise an object with many properties | Build one field at a time, join with `','`, wrap with `'{'` / `'}'` |
-| Array of string keys | Inline `[&quot;k1&quot;,&quot;k2&quot;]` inside `JSON.stringify(...)` |
-| Array of objects | Serialise each with `JSON.stringify`, then `'[' + a + ',' + b + ']'` |
-| Accumulated object → `JSON.stringify` | **Forbidden** — StackOverflowError. Use the concatenation pattern. |
 
 ---
 
@@ -621,7 +632,7 @@ When action sets accept a `logLevel` parameter, gate verbose log calls with an `
   <arg name="condition" value="logLevel === &quot;debug&quot;"/>
   <arg name="then">
     <action name="log">
-      <arg name="message" value="&quot;Record dump: &quot; + JSON.stringify(record)"/>
+      <arg name="message" value="&quot;Record dump: &quot; + toJSON(record)"/>
       <arg name="level" value="&quot;DEBUG&quot;"/>
     </action>
   </arg>
@@ -808,19 +819,15 @@ add/remove reconciliation needs:
 | Normalize single value/record → array | `[].concat(value)` |
 | Set difference (A not in B) | `new Set(b)` then `a.filter(x =&gt; !setB.has(x))` |
 
-### JSON.stringify for logging
+### Logging objects - use `toJSON`
 
-Logging an object as the sole `message` arg renders it readably, but **concatenating an object into
-a string** (`"x: " + obj`) yields `[object Object]`. Use `JSON.stringify(obj)` — or
-`JSON.stringify(obj, null, 4)` for indented multi-line output — when embedding an object in a
-message:
+Logging an object as the **sole** `message` arg renders it readably, but concatenating an object
+into a string (`&quot;x: &quot; + obj`) yields `[object Object]` (and a Record yields a Java map string).
+Serialise with `toJSON(obj)`, or `toJSON(obj, true)` for indented multi-line output:
 
 ```xml
-<arg name="message" value="&quot;Record: &quot; + JSON.stringify(record, null, 4)"/>
+<arg name="message" value="&quot;Record: &quot; + toJSON(record, true)"/>
 ```
-
-(The StackOverflow caveat in § setVariable Expression Compiler Rules still applies: never pass an
-object you accumulated across multiple `setVariable` calls to `JSON.stringify`.)
 
 ---
 
@@ -859,6 +866,10 @@ sentinel like `"ERROR"` so the caller can branch on it (halt, send mail, etc.). 
 "Try Catch" page,
 `https://idauto.atlassian.net/wiki/spaces/PSO/pages/3145465977/Try+Catch`.
 
+Note: the built-in `parseJSON` action does **not** throw on malformed input - it auto-logs an ERROR
+and returns `undefined`. The `isValidJSON` guard above (which calls native `JSON.parse` inside the
+try/catch) is for **suppressing that auto-error and branching cleanly**, not for preventing a crash.
+
 ---
 
 ## String & Record Built-in Actions
@@ -893,6 +904,17 @@ JS string methods also work, e.g. fixed-width padding for IDs:
 | `getRecordFieldValues` | `record`, `field` | Array of values for one field (handles multi-valued). |
 | `arrayContains` | `array`, `value` | Boolean — membership test. |
 
+
+### JSON actions
+
+| Action | Args | Returns |
+|---|---|---|
+| `parseJSON` | `json` | Native JS value (object / array / scalar / null). Malformed input auto-logs an ERROR and returns `undefined` (no abort). |
+| `toJSON` | `item`, `indent?` (boolean) | JSON string; `indent=true` gives 4-space pretty output. Also callable inline as an expression function. |
+
+Prefer these over `JSON.parse` / `JSON.stringify`. Record keys serialise alphabetically; plain and
+`parseJSON`-seeded objects keep insertion order. `&quot;&quot; + record` is a Java map string, not JSON -
+use `toJSON(record)`.
 ---
 
 ## Function Mode Pattern
@@ -1128,6 +1150,13 @@ array, json object) — is in **`references/shared-globals.md`**. Check there fi
 key name. (Those keys are defined in `SharedGlobals.properties`, but you still reference them as
 `Global.<key>` in the action set.)
 
+**`json()`-wrapped globals are pre-parsed natives.** A value defined as `json([...])` or
+`json({...})` in `SharedGlobals.properties` is parsed by Connect at load time, so `Global.<key>` is
+already a native array/object - index it, read `.length`, access properties, and call array methods
+directly. **Never** wrap it in `parseJSON` / `JSON.parse`: that coerces the native value to a string
+first and throws `SyntaxError` at runtime. (This mirrors `encrypt()` values, which are
+auto-decrypted on access.) Parsing is only ever for raw JSON *strings*.
+
 ---
 
 ## argDef Rules
@@ -1178,8 +1207,9 @@ Before delivering any XML:
     vs `</arg>` closes; they must match
 11. **All `argDef` elements** have a `description` attribute
 12. **`logAuditEvent` called** after every write to an external system (`targetID` = idautoID, `extendedProperties` = the record)
-13. **No bare object/array literals** in `setVariable value=` — use `JSON.stringify({...})` for
-    structured data; never pass an accumulated multi-property object to `JSON.stringify`
+13. **Structured data is serialised with `toJSON(obj)`** (not `JSON.stringify`); bare `{...}` /
+    `[...]` literals still fail the compiler in a `setVariable value=` - seed with `parseJSON('{}')`
+    / `parseJSON('[]')` or build a Record
 14. **String constants containing `"` use single-quote delimiters** — `'&quot;key&quot;:value'`
     not `&quot;\\&quot;key\\&quot;:&quot;value&quot;` (prefer single-quote delimiters; a literal backslash must be doubled — see § String escapes)
 15. **Every `<action>` has `id` (uppercase UUID) and `disabled="false"`** — missing these makes
@@ -1187,6 +1217,11 @@ Before delivering any XML:
 16. **Editor-facing text is plain ASCII** — no em/en dashes, smart quotes, ellipsis, or HTML/markdown
     in `comment` values, the `description` attribute, or section labels (log messages are exempt)
 17. **Literal backslashes are doubled** — a literal `\` in any string value is written `\\`
+18. **No sibling actions after a mid-block nested `if`/`while`** in the same `then`/`else`/`do`
+    when authoring via the MCP JSON - the trailing siblings get hoisted onto the parent `if` and
+    break compilation (`Can't redefine property 'if.<action>'`). Make the nested block the last
+    element of its container, or flatten the branch to ternary `setVariable`s. After any MCP save,
+    re-fetch and confirm the `version` incremented (a client timeout does not mean the save failed)
 
 ---
 
@@ -1203,9 +1238,9 @@ Before delivering any XML:
 | Opening a connection inside a function when a session was passed | Check `!session` first |
 | Using generic `openConnection` for AD, RI, Google, Portal | Use the typed connection action for the target system — see `references/connections.md` |
 | XML written with pretty-print indentation | Flatten to single-line compact output |
-| Bare `{...}` or `[...]` literal in `setVariable value=` | Wrap in `JSON.stringify({...})` — bare object/array literals fail at compile time |
+| Bare `{...}` or `[...]` literal in `setVariable value=` | Serialise with `toJSON(obj)`; seed an empty container with `parseJSON('{}')` / `parseJSON('[]')` - bare object/array literals fail at compile time |
 | Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare `&`/`<`/`>` make the XML ill-formed (fails `xmllint`) before the JS compiler runs |
-| Accumulated object passed to `JSON.stringify` | Use the string concatenation pattern — each entry gets its own inline `JSON.stringify` call |
+| Accumulated object passed to `JSON.stringify` | Serialise with `toJSON(obj)` - it handles accumulated objects and Records; the StackOverflow risk is specific to live Java-wrapped objects (LDAP/directory results) |
 | `"\\"key\\"":` style string (backslash-escaped quotes) | Prefer a single-quote outer delimiter: `'"key":'`; write a literal backslash as `\\` |
 | `setVariable` to copy a record before mutating it | Use `copyRecord` — `setVariable` creates an alias, not a copy; both names point to the same object |
 | `setVariable` to copy an array before removing items in a loop | Use `copyArray` — same alias problem; mutating the iterated array breaks `forEach` |
@@ -1219,6 +1254,11 @@ Before delivering any XML:
 | Em dash / smart quotes in a comment, description, or section label | Use plain ASCII; the Connect editor does not render extended punctuation (log messages are fine) |
 | Single backslash for a literal `\` (e.g. `&quot;\&quot;`) | Double it — a literal backslash is `\\`; a single `\` escapes the next character |
 | `recordChanges.length` on an `openADChangeIterator` / `openOpenLDAPChangeIterator` result | Returns `undefined` — the output is a Connect iterator object, not an array. Count by incrementing a counter inside the `forEach` over it — see § Change Iterators |
+| Sibling actions after a mid-block nested `if` (MCP save) | They get hoisted onto the parent `if` and break compile (`Can't redefine property 'if.<action>'`) - make the nested `if` the last element, or flatten to ternary `setVariable`s |
+| `&quot;&quot; + record` to build JSON | Yields a Java map `toString`, not JSON - serialise with `toJSON(record)` |
+| `parseJSON` on malformed input | Auto-logs its own ERROR and returns `undefined` (does not abort) - pre-gate with `isValidJSON` for clean branching |
+| `JSON.parse(Global.jsonWrappedVar)` | Throws `SyntaxError` - a `json()` global is already a native object/array; reference it directly |
+| Running a bare, unsaved `section`/action via the MCP | `NullPointerException` in `compileActionDef` - save the action set first, then run it by name |
 
 ---
 
@@ -1228,7 +1268,7 @@ Before delivering any XML:
 
 The `data` argument of `httpPOST` is sent as-is as the request body. A raw JS object will
 serialize as `[object Object]`, causing a 400 parse error. **Always wrap the body in `toJSON()`**
-when the endpoint expects JSON:
+when the endpoint expects JSON (`toJSON` is the standard JSON serializer throughout - see § Serialising structured data - not an HTTP-only idiom):
 
 ```xml
 <action name="setVariable">
