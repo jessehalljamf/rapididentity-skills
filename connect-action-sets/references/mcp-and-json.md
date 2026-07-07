@@ -123,19 +123,34 @@ That succeeds — proving the endpoint accepts the content and isolating the fau
 Then diff your intended body against the canonical fetch to find the bad `name`. Compare the two
 objects; don't theorize about the server.
 
-### The `500 ConstraintViolationException` — node-id uniqueness
+### The `500 ConstraintViolationException` — node-id uniqueness is *per action set*
 
 ```
 javax.persistence...ConstraintViolationException: could not execute statement   (httpStatus 500)
 ```
 
-A real, **separate** failure: a DB uniqueness violation triggered when the body contains an
-action-node `id` that already exists in **another** action set. Connect enforces
-**globally-unique action-node `id`s across all action sets**, not just within one. So:
+A real, **separate** failure from the 400: a DB uniqueness violation. But the scope is **per
+action set, not global**. Connect keys action-node `id`s by their parent action set — the
+effective unique key is *(action-set identity + node `id`)*. Two different action sets can
+hold the **same** node `id`s with no collision.
 
-- Never clone a section/branch into another action set without re-IDing **every** node in the
-  copied block.
-- A throwaway probe must use all-fresh node IDs, never copies of a real set's IDs.
+**Proven empirically:** an API clone of `Tools_RICloudUserDetail` → `Tools_RICloudUserDetail_copy`
+kept all 51 node `id`s byte-identical; both sets coexist and run on the same live instance.
+Only the action-set `name` changed.
+
+So:
+
+- **Cloning a whole action set** (API clone, or export→rename→import) does **not** require
+  re-IDing nodes — the new name/identity disambiguates. Do not re-ID whole-set clones.
+- The only hard constraint is **no duplicate node `id` within a single set's body**.
+- **Copying a section into a *different* existing set** may keep the source `id`s — *unless*
+  the destination already contains those exact `id`s (a within-body duplicate).
+- A throwaway probe just needs its **own** action-set identity and no duplicate `id`s within
+  its body; it may reuse another set's node `id`s.
+
+The 500 therefore signals a **within-body duplicate `id`** (a section pasted into a set that
+already held those `id`s, or a probe reusing a real set's action-set identity), not a
+cross-set collision.
 
 ### What the save endpoint demonstrably ACCEPTS
 
@@ -154,10 +169,11 @@ causes the 400 — if you see one, suspect your diff:
 ### Throwaway-probe technique (safe interrogation)
 
 To test what the save accepts **without touching a production action set**: create a **new**
-action set with a fresh action-set UUID, a `zz`-prefixed name (e.g. `zzProbeDeleteMe`),
-`version: 0`, and **every node `id` freshly unique**; save; observe; `delete-connect-action`.
-A probe `500` (uniqueness) tells you nothing about a `400` (malformed field) — different failure
-classes. Confirm no `zz...` row persists afterward.
+action set with its **own** fresh action-set identity, a `zz`-prefixed name (e.g. `zzProbeDeleteMe`),
+`version: 0`, and **no duplicate node `id`s within its body** (it may reuse another set's node
+`id`s — uniqueness is per-set, so it need not re-ID everything); save; observe;
+`delete-connect-action`. A probe `500` (within-body duplicate `id`) tells you nothing about a
+`400` (malformed field) — different failure classes. Confirm no `zz...` row persists afterward.
 
 ### XML-import fallback (genuine, but not the default)
 
