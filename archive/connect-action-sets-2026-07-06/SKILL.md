@@ -55,14 +55,12 @@ doing any design or editing work.
 | Logging — built-in `log` action | § Logging |
 | Counting — variable-based counters | § Counting |
 | Control flow — forEach, if/while, break, labeled loops/continue | § Control Flow |
-| `Can't redefine property 'if.else'` compile error — duplicate then/else, no `else if` in Connect | § if / while / break (callout) |
 | JavaScript & engine idioms — arrow fns, named fns, Set, filter, toJSON/parseJSON | § JavaScript & Engine Idioms |
 | Try/Catch — error handling via a JS function | § Try/Catch |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
 | Community Adapter (ca) authoring — naming, sessions, dependencies, param order | § Community Adapter (ca) Action Set Authoring |
-| **Fast task → builtin lookup** (strings, arrays, records, dates, DNs, crypto, connections) | `references/native-action-cheatsheet.md` |
-| Connections — FnOpenConns (canonical), typed built-in actions per system, AES CA | § Connections → `references/connections.md` |
+| Connections — typed actions per target system (incl. AES adapter, callGoogleAPI) | § Connections → `references/connections.md` |
 | Global property references | § Global Properties |
 | Standard SharedGlobals keys by category (AD, Google, M365, DB, meta, etc.) | `references/shared-globals.md` |
 | HTTP actions — REST API patterns | § HTTP Actions |
@@ -70,7 +68,6 @@ doing any design or editing work.
 | Change iterators (AD/OpenLDAP) — no `.length`, count in `forEach` | § Change Iterators |
 | LDAP polling loop pattern | § LDAP Polling Loop Pattern |
 | RI Sponsorship API | `references/ri-sponsorship-api.md` |
-| `startPortalWorkflow` — submit a WFM request programmatically from Connect | `references/ri-start-portal-workflow.md` |
 | Auditing writes with `logAuditEvent` — eventNames, args, AA perp pattern | § Auditing — logAuditEvent |
 | Alternate Actions — input/output contracts per AA type | `references/ri-alternate-actions.md` |
 | Workflow variable substitution, valuePairs format, WFM return contract | `references/ri-workflow-variables.md` |
@@ -742,41 +739,6 @@ Loop arg names are **`variable`** (the loop-variable name) and **`collection`** 
 - `while` takes only `condition` + `do` — no `else`.
 - `break` exits the nearest loop.
 
-> **Common compile error: `Can't redefine property 'if.else'`.** This means an `if` action has
-> **two** `else` args (or two `then` args) as direct children — almost always because a block meant
-> for a *nested* `if`'s `else` branch was mistakenly attached as a second `else` on the **outer**
-> `if` instead. This happens easily when hand-editing a three-way branch (`if A ... else if B ...
-> else ...`), since Connect has no native `else if` — a three-way branch is always an `if` nested
-> inside the outer `else`, and the innermost default block belongs to the *inner* `if`'s `else`,
-> not the outer one's.
->
-> ```xml
-> <!-- WRONG: two <arg name="else"> children on the same outer if -->
-> <action name="if"><arg name="condition" value="a"/>
->   <arg name="then">...</arg>
->   <arg name="else"><action name="if"><arg name="condition" value="b"/>
->     <arg name="then">...</arg>
->     <!-- inner if has no else here -->
->   </action></arg>
->   <arg name="else">...default block...</arg>  <!-- ORPHANED second else -->
-> </action>
->
-> <!-- RIGHT: default block is the INNER if's else -->
-> <action name="if"><arg name="condition" value="a"/>
->   <arg name="then">...</arg>
->   <arg name="else"><action name="if"><arg name="condition" value="b"/>
->     <arg name="then">...</arg>
->     <arg name="else">...default block...</arg>  <!-- belongs here -->
->   </action></arg>
-> </action>
-> ```
->
-> To diagnose: for every `if` action, count its direct `<arg name="then">` and `<arg name="else">`
-> children — each must appear at most once. A quick check (Python/`xml.etree.ElementTree` or
-> equivalent) that walks every `action` element and flags duplicate direct `arg name=` children
-> finds this instantly, faster than eyeballing deeply nested single-line XML. See also item 18 in
-> § Validation Checklist and the matching row in § Common Pitfalls.
-
 ### Labeled loops and continue
 
 A `forEach` (or `while`) may carry a `label`; `continue` and `break` can then target that label by
@@ -912,76 +874,48 @@ try/catch) is for **suppressing that auto-error and branching cleanly**, not for
 
 ## String & Record Built-in Actions
 
-Connect ships built-in actions for common string, array, record, and JSON operations. **Prefer these over inline JS.** Full call syntax for every builtin is in `references/native-action-cheatsheet.md`.
+Connect ships built-in actions for common string and record operations. Prefer these (or the
+equivalent JS methods) over hand-rolled logic.
 
 ### String actions
 
-| Action | Key args | Notes |
+| Action | Args | Notes |
 |---|---|---|
-| `splitString` | `string`, `delimiter` | Returns an array. Single-value input yields a one-element array. |
-| `stringContains` | `string`, `pattern`, `ignoreCase` | `pattern` accepts plain string **or regex literal** (`/\d/`). |
-| `stringEquals` | `string`, `pattern`, `ignoreCase` | With regex pattern, acts as a match test, not literal equality. |
-| `stringStartsWith` / `stringEndsWith` | `string`, `pattern`, `ignoreCase` | Boundary checks. |
-| `stringToUpper` / `stringToLower` | `string` | Case conversion. |
-| `stringLength` | `string` | Returns integer length. |
+| `splitString` | `string`, `delimiter` | Returns an array. A value with no delimiter yields a single-item array. |
+| `stringContains` | `string`, `pattern`, `ignoreCase` | `pattern` accepts a plain string **or a regex literal** (e.g. `/\d/`). |
+| `stringEquals` | `string`, `pattern`, `ignoreCase` | With a regex `pattern` this is a *match*, not literal equality — e.g. `/^\d+$/` (all digits), an email regex, etc. |
 | `stringRepeat` | `text`, `count` | Returns `text` repeated `count` times. |
-| `stringReplaceAll` | `string`, `match`, `replacement`, `ignoreCase` | Replace all occurrences. |
-| `stringReplaceFirst` | same | Replace first occurrence only. |
-| `subString` | `string`, `startIndex`, `length` | Extract substring. |
-| `stringFromTemplate` | `format`, `args` | `%field%` or `%index%` substitution from a record or array. |
-| `stringEscape` | `string`, `escapeType` | `html`, `url`, or `ecmascript`. |
-| `stringRemoveDiacriticals` | `string` | Strips combining diacritics; precomposed letters (Ø, Å) pass through. |
 
-JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline when no native equivalent exists.
+JS string methods also work, e.g. fixed-width padding for IDs:
 
-### Array actions
+```xml
+<arg name="value" value="exString.padStart(3,'0')"/>  <!-- '5' -> '005' -->
+<arg name="value" value="exString.padEnd(3,'0')"/>    <!-- '5' -> '500' -->
+```
 
-| Action | Key args | Notes |
+### Record / array introspection actions
+
+| Action | Args | Returns |
 |---|---|---|
-| `createArray` | `size?` | Empty array or pre-sized with nulls. **Never** use bare `[]` literal. |
-| `copyArray` | `array` | Deep copy — use before mutating. `setVariable` is an alias. |
-| `appendArrayItem` / `appendArrayItems` | `array`, `item` / `array`, `items` | Append one item or all items from src. |
-| `getArraySize` | `array` | Integer size. |
-| `getArrayItem` / `setArrayItem` | `array`, `index` | Read or write by index. |
-| `insertArrayItem` / `insertArrayItems` | `array`, `index`, `item`/`items` | Insert at index. |
-| `removeArrayItem` | `array`, `index` | Remove one item, returns it. |
-| `removeArrayItems` | `array`, `index`, `count` | Remove N items, returns removed array. |
-| `removeLastArrayItem` | `array` | Pop last item, returns it. |
-| `reverseArray` | `array` | Mutates in place. |
-| `sortArray` | `array`, `ascending?`, `ignoreCase?`, `keyFields?` | Full-featured sort. Prefer over JS `.sort()`. |
-| `joinArray` | `array`, `delimiter?` | Concatenate to string. Prefer over `arr.join()`. |
-| `sliceArray` | `array`, `startIndex`, `endIndex?` | Returns new subarray; original unchanged. |
-| `arrayContains` | `array`, `value` | Boolean membership test. |
-
-### Record actions
-
-| Action | Key args | Notes |
-|---|---|---|
-| `createRecord` | — | Empty Record. `createRecordFromObject(obj)` from a JS object (values coerced to strings). |
-| `copyRecord` | `record` | Deep copy — always use before mutating. `setVariable` is an alias. |
-| `setRecordFieldValue` / `getRecordFieldValue` | `record`, `field`, `value?` | Single-field set/get. |
-| `setRecordFieldValues` / `getRecordFieldValues` | `record`, `field`, `values?` | Multi-valued field set/get. |
-| `addRecordFieldValue` / `addRecordFieldValues` | `record`, `field`, `value`/`values` | Append to multi-valued field. |
-| `clearRecordFieldValues` | `record`, `field` | Clears to null (not empty array). |
+| `createRecord` | (none) | A new empty record (`outputVar`). |
+| `setRecordFieldValue` | `record`, `field`, `value` | Sets one field. |
+| `setRecordFieldValues` | `record`, `field`, `values` | Sets a multi-valued field from an array. |
 | `getRecordFieldNames` | `record` | Array of field names. |
-| `hasRecordField` / `hasRecordFieldValue` | `record`, `field`, `value?` | Existence / value membership checks. |
-| `removeRecordField` / `removeRecordFields` | `record`, `field`/`fields` | Remove fields. `delete rec.field` does not work on Records. |
-| `removeRecordFieldValue` / `removeRecordFieldValues` | `record`, `field`, `value`/`values` | Remove specific values from multi-valued field. |
-| `renameRecordField` / `renameRecordFields` | `record`, `oldName`, `newName` / comma-delimited pairs | Rename field keys. |
-| `copyRecordField` / `copyRecordFields` | `source`, `field`/`fields`, `destination` | Copy fields across records. |
-| `filterRecordFields` | `record`, `fields` | Keep only named fields; remove all others. |
-| `recordEquals` | `record1`, `record2` | Field-by-field equality check. |
-| `createRecordFromXML` | `xmlObject`, `excludeAttrs?` | Build Record from parsed XML; child elements become fields. |
+| `getRecordFieldValues` | `record`, `field` | Array of values for one field (handles multi-valued). |
+| `arrayContains` | `array`, `value` | Boolean — membership test. |
+
 
 ### JSON actions
 
 | Action | Args | Returns |
 |---|---|---|
 | `parseJSON` | `json` | Native JS value (object / array / scalar / null). Malformed input auto-logs an ERROR and returns `undefined` (no abort). |
-| `toJSON` | `item`, `indent?` (boolean) | JSON string; `indent=true` gives 4-space pretty output. Also callable inline. |
+| `toJSON` | `item`, `indent?` (boolean) | JSON string; `indent=true` gives 4-space pretty output. Also callable inline as an expression function. |
 
-Prefer these over `JSON.parse` / `JSON.stringify`. Record keys serialise alphabetically; plain and `parseJSON`-seeded objects keep insertion order. `"" + record` yields a Java map string — always use `toJSON(record)`.
-
+Prefer these over `JSON.parse` / `JSON.stringify`. Record keys serialise alphabetically; plain and
+`parseJSON`-seeded objects keep insertion order. `&quot;&quot; + record` is a Java map string, not JSON -
+use `toJSON(record)`.
+---
 
 ## Function Mode Pattern
 
@@ -1129,21 +1063,25 @@ When deciding which Connect action to use, follow this order:
 
 ## Connections
 
-For non-Community-Adapter action sets, use `FnOpenConns` (`ref_SharedLibrary`) as the single entry point. It opens one or more connections per call and returns a `conns` record keyed by prefix (`conns.ad.session`, `conns.google.session`, etc.). For CA sets, use the built-in typed actions directly (CA sets cannot call outside their project folder).
+RapidIdentity Connect targets many systems, each with its own typed connection action. Always store
+the result in `outputVar="session"`, check `!session` before proceeding, and source all credentials
+from `Global.*` — never hardcode them.
 
-| Target system | Non-CA approach | CA approach |
-|---|---|---|
-| Active Directory | `FnOpenConns(targetSystem="ad")` | `openADConnection` + `getIdBridgeConnectInfo` |
-| Google | `FnOpenConns(targetSystem="google")` | `defineGoogleExtendedOAuthConnection` |
-| Microsoft 365 | `FnOpenConns(targetSystem="microsoft")` | OAuth2 `httpPOST` for bearer token |
-| RapidIdentity Metadirectory | `FnOpenConns(targetSystem="RapidIdentity")` | `openMetadirLDAPConnection` (no args) |
-| RapidIdentity Portal | `FnOpenConns(targetSystem="Portal")` | `defineCloudPortalConnection` (no args) |
-| Database | `FnOpenConns(targetSystem="db")` | `openDatabaseConnection` + bridge |
-| AES encrypt/decrypt | AES CA actions directly (`GenerateAESKey`, `AESEncrypt`, `AESDecrypt`) | same |
+| Target system | Connection action |
+|---|---|
+| Active Directory | `openADConnection` (needs `getIdBridgeConnectInfo` first) |
+| RapidIdentity Metadirectory (OpenLDAP) | `openMetadirLDAPConnection` (no args) |
+| RapidIdentity Portal | `defineCloudPortalConnection` (no args) |
+| Google | `defineGoogleExtendedOAuthConnection` (+ generic `callGoogleAPI`) |
+| Microsoft 365 | OAuth2 bearer token via `httpPOST` (no built-in action) |
+| Database | `openDatabaseConnection` (needs a bridge + connection-string template) |
+| AES encrypt/decrypt | AES Community Adapter actions (`GenerateAESKey`, `AESEncrypt`, `AESDecrypt`, …) |
 
-Only **closeable** connection/IO actions are closed with `<action name="close"><arg name="closeable" value="session"/></action>`. OAuth2 / HTTP Basic connections (Microsoft Graph, Google OAuth) hold a token, not a handle, and are **not** closed.
+Only **closeable** connection/IO actions are closed with `<action name="close"><arg name="closeable" value="session"/></action>`. OAuth2 / HTTP Basic connections (e.g. Microsoft Graph, Google OAuth) hold a token, not a handle, and are **not** closed. See the closeable-actions list and the not-closeable rule in `references/connections.md`.
 
-**Full per-system details — `FnOpenConns` Global key requirements, built-in connection args, `getLDAPRecords` `baseDn`/`attributes` selection, the AES sequence, failure handling, and closing — are in `references/connections.md`. Read it before authoring any connection logic. Fast calling-pattern lookup: `references/native-action-cheatsheet.md` § Connections.**
+**Full per-system details — required args, Global keys, `getLDAPRecords` `baseDn`/`attributes`
+selection, the AES sequence, failure handling, and closing — are in
+`references/connections.md`. Read it before authoring any connection logic.**
 
 ---
 ## Auditing — logAuditEvent
@@ -1279,14 +1217,11 @@ Before delivering any XML:
 16. **Editor-facing text is plain ASCII** — no em/en dashes, smart quotes, ellipsis, or HTML/markdown
     in `comment` values, the `description` attribute, or section labels (log messages are exempt)
 17. **Literal backslashes are doubled** — a literal `\` in any string value is written `\\`
-18. **No `if` action has duplicate direct `then`/`else` args.** Two common causes, same symptom
-    (`Can't redefine property 'if.else'` or `'if.<action>'`): (a) hand-authoring a three-way
-    `if/else if/else` branch and attaching the default block to the outer `if` instead of the
-    inner nested `if` — see the callout under § if / while / break; (b) via the MCP JSON, sibling
-    actions placed after a mid-block nested `if`/`while` in the same `then`/`else`/`do` get hoisted
-    onto the parent `if`. Fix: make the nested block the last element of its container, or flatten
-    to ternary `setVariable`s. After any MCP save, re-fetch and confirm the `version` incremented
-    (a client timeout does not mean the save failed)
+18. **No sibling actions after a mid-block nested `if`/`while`** in the same `then`/`else`/`do`
+    when authoring via the MCP JSON - the trailing siblings get hoisted onto the parent `if` and
+    break compilation (`Can't redefine property 'if.<action>'`). Make the nested block the last
+    element of its container, or flatten the branch to ternary `setVariable`s. After any MCP save,
+    re-fetch and confirm the `version` incremented (a client timeout does not mean the save failed)
 
 ---
 
@@ -1296,32 +1231,34 @@ Before delivering any XML:
 |---|---|
 | Section label `return` | Rename to `returnSuccess`, `returnRecord`, etc. |
 | Hardcoded base DNs or hostnames | Use `Global.*` references |
-| `SharedGlobal.` prefix in an action set | Reference every global as `Global.variableName` — `SharedGlobal.` is never used in action set expressions |
+| `SharedGlobal.` prefix in an action set | Reference every global as `Global.variableName` — `SharedGlobal.` is never used in action set expressions, even for keys defined in `SharedGlobals.properties` |
 | `builtIn="false"` on user action set | Remove the attribute entirely |
-| `record['idautoID']` bracket notation | Change to `record.idautoID` — brackets only for `@` or `-` keys |
+| `record['idautoID']` bracket notation | Change to `record.idautoID` |
 | Individual counter variables (`addCount`, `updateCount`) | Use a single `counts` object |
 | Opening a connection inside a function when a session was passed | Check `!session` first |
-| Using generic `openConnection` for AD, RI, Google, Portal | Non-CA: use `FnOpenConns`; CA: use the typed built-in — see `references/connections.md` |
+| Using generic `openConnection` for AD, RI, Google, Portal | Use the typed connection action for the target system — see `references/connections.md` |
 | XML written with pretty-print indentation | Flatten to single-line compact output |
-| Bare `{...}` or `[...]` literal in `setVariable value=` | Fails the JS compiler — seed empty containers with `parseJSON('{}')` / `parseJSON('[]')`; build objects with `createRecord`; see `references/native-action-cheatsheet.md` |
-| Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare metacharacters make the XML ill-formed before the JS compiler runs |
-| `setVariable` to copy a Record or extract from results array | Use `copyRecord` — `setVariable` aliases, not copies; mutation on one affects both. Applies to snapshots, `results[0]` extraction, and loop guards |
-| `setVariable` to copy an array before removing items in a loop | Use `copyArray` — same alias problem; mutating the array being iterated breaks `forEach` |
-| `FnHasChanged` returns false when changes were made | Both args point to the same object due to `setVariable` aliasing — `copyRecord` for the snapshot before mutation |
+| Bare `{...}` or `[...]` literal in `setVariable value=` | Serialise with `toJSON(obj)`; seed an empty container with `parseJSON('{}')` / `parseJSON('[]')` - bare object/array literals fail at compile time |
+| Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare `&`/`<`/`>` make the XML ill-formed (fails `xmllint`) before the JS compiler runs |
+| Accumulated object passed to `JSON.stringify` | Serialise with `toJSON(obj)` - it handles accumulated objects and Records; the StackOverflow risk is specific to live Java-wrapped objects (LDAP/directory results) |
+| `"\\"key\\"":` style string (backslash-escaped quotes) | Prefer a single-quote outer delimiter: `'"key":'`; write a literal backslash as `\\` |
+| `setVariable` to copy a record before mutating it | Use `copyRecord` — `setVariable` creates an alias, not a copy; both names point to the same object |
+| `setVariable` to copy an array before removing items in a loop | Use `copyArray` — same alias problem; mutating the iterated array breaks `forEach` |
+| `FnHasChanged` returns false when changes were made | The "old" and "new" records are the same object due to `setVariable` aliasing; use `copyRecord` for the snapshot |
 | `<action>` missing `id` or `disabled` | Actions render read-only in Connect editor — every action needs `id="UPPERCASE-UUID"` and `disabled="false"` |
 | `forEach` with `item` / `items` args | Wrong arg names — use `variable` (loop var name) and `collection` (the array) |
-| `getLDAPRecords` with `attributes` value `[]` | Bare array literal fails the expression compiler — use `"*,+"`, `"*"`, or `"attr1,attr2"` |
-| Nesting arg (`do`/`then`/`else`) has a `"value"` field | Remove `value` from nesting args — its presence causes `Property must be a list of actions`; correct form: `{"name":"do","actions":[...]}` |
+| `getLDAPRecords` with `attributes` value `[]` | Bare array literal fails the expression compiler — use `"*,+"` (all attrs), `"*"` (standard only), or `"attr1,attr2"` (specific) |
+| `setVariable` to extract a record from results array (`results[0]`) | Use `copyRecord outputVar="record"` with `record="results[0]"` — `setVariable` creates an alias, not a copy. After extracting, never mutate via `setVariable`. |
+| Nesting arg (`do`/`then`/`else`) has a `"value"` field | Remove `value` entirely from nesting args — its presence (even `""`) tells Connect the arg is a scalar, causing `Property must be a list of actions`. Correct form: `{"name": "do", "actions": [...]}` |
 | HTML or markdown in a `log` message | The log viewer is plain text — tags appear literally; use `\n`, `\t`, and the `color` arg for layout |
-| Em dash / smart quotes in a comment, description, or section label | Use plain ASCII — the Connect editor does not render extended punctuation (log messages are fine) |
-| Single backslash for a literal `\` | Double it — a literal backslash is `\\`; a single `\` escapes the next character |
-| `recordChanges.length` on a change iterator result | Always `undefined` — the result is a Connect iterator, not an array; count by incrementing a variable inside `forEach` — see § Change Iterators |
-| Sibling actions after a mid-block nested `if` (MCP save) | They get hoisted onto the parent `if` and break compile (`Can't redefine property 'if.<action>'`) — make the nested `if` the last element, or flatten to ternary `setVariable`s |
-| Hand-authored `if/else if/else` puts the default block on the outer `if` | Connect has no `else if` — a three-way branch nests an `if` inside the outer `else`; the default block belongs to the *inner* `if`'s `else`, not a second `else` on the outer `if`. Same `Can't redefine property 'if.else'` error — see callout under § if / while / break |
-| `"" + record` or `JSON.stringify(obj)` to build JSON | Yields a Java map `toString`; `JSON.stringify` also misses Records — always use `toJSON(record)` |
-| `parseJSON` on malformed input | Auto-logs its own ERROR, returns `undefined`, does not abort — pre-gate with `isValidJSON` JS function for clean branching |
-| `JSON.parse(Global.jsonWrappedVar)` | Throws `SyntaxError` — a `json()` global is already a native value; reference it directly without parsing |
-| Running a bare, unsaved action via the MCP | `NullPointerException` in `compileActionDef` — save the action set first, then run by name; see `references/mcp-and-json.md` |
+| Em dash / smart quotes in a comment, description, or section label | Use plain ASCII; the Connect editor does not render extended punctuation (log messages are fine) |
+| Single backslash for a literal `\` (e.g. `&quot;\&quot;`) | Double it — a literal backslash is `\\`; a single `\` escapes the next character |
+| `recordChanges.length` on an `openADChangeIterator` / `openOpenLDAPChangeIterator` result | Returns `undefined` — the output is a Connect iterator object, not an array. Count by incrementing a counter inside the `forEach` over it — see § Change Iterators |
+| Sibling actions after a mid-block nested `if` (MCP save) | They get hoisted onto the parent `if` and break compile (`Can't redefine property 'if.<action>'`) - make the nested `if` the last element, or flatten to ternary `setVariable`s |
+| `&quot;&quot; + record` to build JSON | Yields a Java map `toString`, not JSON - serialise with `toJSON(record)` |
+| `parseJSON` on malformed input | Auto-logs its own ERROR and returns `undefined` (does not abort) - pre-gate with `isValidJSON` for clean branching |
+| `JSON.parse(Global.jsonWrappedVar)` | Throws `SyntaxError` - a `json()` global is already a native object/array; reference it directly |
+| Running a bare, unsaved `section`/action via the MCP | `NullPointerException` in `compileActionDef` - save the action set first, then run it by name |
 
 ---
 
@@ -1516,7 +1453,6 @@ Load-when-relevant (these were split out of SKILL.md to keep it lean):
 - `references/connections.md` — Per-system connection details: AD, RI Metadirectory (incl. `getLDAPRecords` `baseDn`/`attributes` selection), Portal, Google + `callGoogleAPI`, Microsoft 365, Database, the AES Community Adapter encrypt/decrypt sequence, failure handling, and closing. **Read before authoring any connection logic.**
 - `references/mcp-and-json.md` — MCP workflow (read/explore, design, push, delete), the JSON object model (file JSON vs API JSON, argDef/action/arg shapes), and field-by-field XML ↔ JSON conversion. **Read when working against a live instance via the MCP or converting formats.**
 - `references/ri-sponsorship-api.md` — RI Sponsorship API endpoints, create-account request body, and custom-attribute UUID resolution. **Read only for sponsored-account work.**
-- `references/ri-start-portal-workflow.md` — `startPortalWorkflow` built-in action: signature, required portal session, `entitlementId` lookup, `formData` Record prep, and a full skeleton. **Read when submitting a WFM request programmatically from Connect (e.g. an Alternate Action or scheduled job).**
 - `references/ri-alternate-actions.md` — Input properties and return contracts for all 10 Alternate Action types (Profiles, Groups, Sponsorship). **Read when writing an AA action set.**
 - `references/ri-workflow-variables.md` — `%{...}` variable substitution table, `valuePairs` format, WFM return contract, form field types. **Read when writing WFM action sets or workflow definitions.**
 - `references/ri-connect-admin-api.md` — Connect admin REST endpoints for triggering jobs, listing/killing processes, reading/writing files, listing action sets. **Read when writing action sets that manage Connect itself.**

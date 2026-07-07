@@ -10,50 +10,6 @@ Typed connection actions for each target system. Always store the result in `out
 ---
 
 
-## FnOpenConns — canonical connection helper (non-CA sets)
-
-For non-Community-Adapter action sets, use `FnOpenConns` instead of per-system inline connection blocks. It lives in `ref_SharedLibrary` and opens one or more connections in a single call.
-
-**Contract:** `targetSystem` is a Global prefix or comma-delimited list (`ad`, `google`, `microsoft`, `exchange`, `db`, `file`, `oneRoster`, `Portal`, `RapidIdentity`, `httpBasic`, `bearer`, `oauth2`). Each prefix resolves to a connection type via `Global.{prefix}ConnectionType`, with credentials read from SharedGlobals. Optional `existingSession` is validated/reused (single targetSystem only). Returns a `conns` record keyed by prefix, each entry holding `session`, `properties`, and `process`.
-
-```xml
-<action name="FnOpenConns" outputVar="conns" project="ref_SharedLibrary">
-  <arg name="targetSystem" value="&quot;ad&quot;"/>
-</action>
-<action name="if">
-  <arg name="condition" value="!conns || !conns.ad || !conns.ad.session"/>
-  <arg name="then">
-    <action name="log">
-      <arg name="message" value="&quot;AD connection failed - check Global.adConnectionType and SharedGlobals credentials&quot;"/>
-      <arg name="level" value="&quot;ERROR&quot;"/>
-    </action>
-    <action name="return"><arg name="value" value="false"/></action>
-  </arg>
-  <arg name="else"/>
-</action>
-<action name="setVariable">
-  <arg name="name" value="sessionAD"/>
-  <arg name="value" value="conns.ad.session"/>
-</action>
-```
-
-Multiple systems at once: `targetSystem="&quot;ad,google,microsoft&quot;"` — `conns.ad.session`, `conns.google.session`, `conns.microsoft.session` all available after one call.
-
-**Required Globals per prefix:**
-
-| Prefix | ConnectionType key | Key credential Globals |
-|---|---|---|
-| `ad` | `Global.adConnectionType` | `Global.adUserUPN`, `Global.adPwd` |
-| `google` | `Global.googleConnectionType` | `Global.googleDomain`, `Global.googleOAuthCredentialName`, `Global.googleOAuthScopes`, `Global.googleImpersonateUserId` |
-| `microsoft` | `Global.microsoftConnectionType` | `Global.microsoftApplicationClientID`, `Global.microsoftClientSecretValue`, `Global.microsoftDirectoryTenantID` |
-| `Portal` | `Global.PortalConnectionType` | (internal) |
-| `RapidIdentity` | `Global.RapidIdentityConnectionType` | (internal) |
-| `db` | `Global.dbConnectionType` | `Global.dbUser`, `Global.dbPwd`, `Global.dbConnStringTemplate`, `Global.dbName`, `Global.dbDriverClass` |
-
-**CA constraint:** Community Adapter sets MUST NOT call `FnOpenConns` — it lives in a different project. CA sets use built-in connection actions directly (see sections below).
-
----
-
 Use the correct built-in connection action for each target system. Always store the result in
 `outputVar="session"` and check for failure before proceeding. Never hardcode credentials —
 always use `Global.*` references.
