@@ -25,11 +25,13 @@ connect-action-sets/
     ├── connect-builtin-actions.json  # Full catalogue of built-in Connect actions
     ├── connections.md                # Typed connection patterns (AD, Google, M365, LDAP, etc.)
     ├── mcp-and-json.md               # MCP workflow, JSON object model, XML ↔ JSON conversion
+    ├── native-action-cheatsheet.md   # Task → builtin action → verified XML/MCP call lookup
     ├── openldap-schema.md            # OpenLDAP / ID Store attribute reference
     ├── oracle-fusion-hcm-api.md      # Oracle Fusion HCM — auth, Workers API, pagination
     ├── ri-alternate-actions.md       # Alternate Action input/output contracts
     ├── ri-connect-admin-api.md       # Connect admin REST API — trigger jobs, processes, files
     ├── ri-sponsorship-api.md         # RapidIdentity Sponsorship API
+    ├── ri-start-portal-workflow.md   # startPortalWorkflow builtin — submitting WFM requests from Connect
     ├── ri-workflow-variables.md      # Workflow variable substitution and WFM return contract
     ├── shared-globals.md             # Standard SharedGlobals keys by category
     └── skyward-qmlativ-api.md        # Skyward Qmlativ — auth, Custom API patterns
@@ -46,4 +48,6 @@ connect-action-sets/
 | Validation checklist | `SKILL.md` § Validation Checklist |
 | Connection patterns by target system | `references/connections.md` |
 | All built-in actions | `references/connect-builtin-actions.json` |
+| Task → builtin → verified call lookup | `references/native-action-cheatsheet.md` |
 | MCP / live Connect workflow | `references/mcp-and-json.md` |
+| Starting a WFM workflow from Connect | `references/ri-start-portal-workflow.md` |
