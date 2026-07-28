@@ -58,6 +58,7 @@ doing any design or editing work.
 | `Can't redefine property 'if.else'` compile error — duplicate then/else, no `else if` in Connect | § if / while / break (callout) |
 | JavaScript & engine idioms — arrow fns, named fns, Set, filter, toJSON/parseJSON | § JavaScript & Engine Idioms |
 | Try/Catch — error handling via a JS function | § Try/Catch |
+| Built-in failure model — `getLastErrorMessage`/`getLastErrorCode`/`clearLastError`, log-ERROR side effect | § Built-in failure model |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
 | Community Adapter (ca) authoring — naming, sessions, dependencies, param order | § Community Adapter (ca) Action Set Authoring |
@@ -115,17 +116,23 @@ doing any design or editing work.
 
 ### Root Element
 
-Inside a `.dssproject` archive (`actions/` folder) — bare `<actionDef>`:
+**Default for any from-scratch or hand-generated file: the `<actionDefs>` (plural) wrapper.** A
+bare-root `<actionDef>` file **will not import through the Connect UI standalone importer**, and
+every on-disk manifest action set uses the wrapped form:
+
 ```
-<actionDef xmlns="urn:idauto.net:dss:actiondef" name="MyActionSet" returnsValue="false" description="...">
+<actionDefs xmlns="urn:idauto.net:dss:actiondef"><actionDef name="MyActionSet" returnsValue="false" description="...">...</actionDef></actionDefs>
 ```
 
-Standalone Connect import file — wrap in `<actionDefs>`:
-```
-<actionDefs xmlns="urn:idauto.net:dss:actiondef"><actionDef name="MyActionSet" ...>
-```
+The `xmlns` goes on the **outer** element only. (connect-api `build`/`convert`/`write_action_set`/
+`json_to_xml` with `wrap=true` emits this correctly.)
 
-**Never** include `builtIn` or `community` attributes on user-defined action sets.
+A bare `<actionDef>` root appears only *inside* a `.dssproject` archive's `actions/` folder — you
+may encounter it when reading, but do not author new standalone files that way.
+
+**Never** include `builtIn`, `community`, or `category` attributes on user-defined action sets, and
+never add the `changeCount`/`modifiedMs`/`modifiedBy` reconciliation attributes — all of these are
+RI-saved metadata, not authoring inputs.
 
 ---
 
@@ -336,7 +343,7 @@ Use `copyRecord` (for records) or `copyArray` (for arrays) to get a true indepen
 |---|---|
 | Extract a single record from a results array | `copyRecord outputVar="record"` with `record="results[0]"` — never `setVariable` |
 | Snapshot a record before processing to compare later | `copyRecord` |
-| Snapshot an array before processing to compare later | `copyArray` |
+| Snapshot an array before processing to compare later | `copyArray` — but note it is **shallow**: for an array of Records whose *contents* will mutate, `copyRecord` each element into the snapshot |
 | Iterate an array and remove items inside the loop | `copyArray` — iterate the copy, remove from original |
 | Normalize a multi-valued LDAP attribute inline (e.g. in `forEach collection`) | `[].concat(record.member)` — use directly in the expression; no intermediate variable needed |
 | Pass a record into logic you own and will not mutate | `setVariable` is fine |
@@ -736,11 +743,16 @@ Loop arg names are **`variable`** (the loop-variable name) and **`collection`** 
 </action>
 ```
 
-### if / while / break
+### if / while / break / return
 
 - `if` takes `condition` + `then` (+ optional `else`).
 - `while` takes only `condition` + `do` — no `else`.
 - `break` exits the nearest loop.
+- **`return` exits the entire action set**, not the current section or loop — it is a function-style
+  return, never a section escape. With no `value` arg it returns `undefined` (not `null`); the value
+  reaches the caller only if the calling action specified an `outputVar`. To skip the rest of a loop
+  iteration use `continue`; to leave a loop use `break`; to break out of a labeled section use
+  `break` with the section's `label`.
 
 > **Common compile error: `Can't redefine property 'if.else'`.** This means an `if` action has
 > **two** `else` args (or two `then` args) as direct children — almost always because a block meant
@@ -804,8 +816,16 @@ name. Use this when an inner condition should skip to the next iteration of a sp
 
 ## JavaScript & Engine Idioms
 
-The Connect expression engine is at least ES6-capable. The following are confirmed working and are
-the established idioms used in the ConnectLibrary examples.
+The Connect expression engine is at least partially ES6-capable. The following are confirmed working
+and are the established idioms used in the ConnectLibrary examples — arrow functions and `new Set()`
+are live-verified in deployed production action sets (`FnSyncGroupToTarget`, `SyncGroups`,
+`FnSaveRecord`, `BuildUsersCSV`).
+
+> **Unverified ES6+ — do not use without a live test:** template literals (backticks), `const`/`let`,
+> destructuring, optional chaining (`?.`), nullish coalescing (`??`), spread/rest (`...`),
+> async/await, `class`, `Promise`. Stick to `var`, `function`, and string concatenation for these
+> cases. (Note: some external lint tooling — connect-api `expr.py`, riadmin `connect_check_expression` —
+> flags even arrow functions as errors; that specific rule is a confirmed false positive. Arrows work.)
 
 ### Arrow functions
 
@@ -908,6 +928,33 @@ Note: the built-in `parseJSON` action does **not** throw on malformed input - it
 and returns `undefined`. The `isValidJSON` guard above (which calls native `JSON.parse` inside the
 try/catch) is for **suppressing that auto-error and branching cleanly**, not for preventing a crash.
 
+### Built-in failure model — check returns, not exceptions
+
+Try/catch is only for **JavaScript-level** errors in your own expressions. Connect **built-in
+actions never throw**: on failure they log via the platform error channel, return `undefined` or
+`false`, and set the process error state. The durable pattern is therefore *check the return value
+of every built-in that matters*, then read the error state for diagnostics:
+
+| Action | Behavior |
+|---|---|
+| `getLastErrorMessage` | Returns the last error message set by a failed built-in. **Not cleared by reading it.** |
+| `getLastErrorCode` | Returns the last error code — often an LDAP result code (`NO_SUCH_OBJECT`, `INVALID_DN_SYNTAX`, `ALREADY_EXISTS`). Not every failure sets a code; many set only the message. |
+| `clearLastError` | Clears both. Call explicitly after handling an error, or stale state leaks into later checks. |
+
+**`log` at `level="ERROR"` has a side effect:** it calls `clearLastError()` and then sets
+`lastErrorMessage` to *your logged message*. After an error-level log, `getLastErrorMessage()`
+returns what you just logged, not the original platform error — capture the platform message
+*first* if you need it:
+
+```xml
+<action name="setVariable"><arg name="name" value="ldapError"/><arg name="value" value="getLastErrorMessage()"/></action>
+<action name="log">
+  <arg name="message" value="process.actionSetName + &quot;: save failed -- &quot; + ldapError"/>
+  <arg name="level" value="&quot;ERROR&quot;"/>
+  <arg name="color" value="logColors.error"/>
+</action>
+```
+
 ---
 
 ## String & Record Built-in Actions
@@ -929,7 +976,7 @@ Connect ships built-in actions for common string, array, record, and JSON operat
 | `stringReplaceFirst` | same | Replace first occurrence only. |
 | `subString` | `string`, `startIndex`, `length` | Extract substring. |
 | `stringFromTemplate` | `format`, `args` | `%field%` or `%index%` substitution from a record or array. |
-| `stringEscape` | `string`, `escapeType` | `html`, `url`, or `ecmascript`. |
+| `stringEscape` | `string`, `escapeType` | 12 types: `ecmascript`, `html`, `java`, `ldap-dn`, `ldap-filter`, `sql`, `mysql`, `postgresql`, `uri`, `url`, `xml`, `csv`. Use `ldap-filter` when concatenating user data into LDAP filters, `ldap-dn` for DN components, `csv` for CSV cell values. Accepts string/array/Record input. |
 | `stringRemoveDiacriticals` | `string` | Strips combining diacritics; precomposed letters (Ø, Å) pass through. |
 
 JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline when no native equivalent exists.
@@ -939,7 +986,7 @@ JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline
 | Action | Key args | Notes |
 |---|---|---|
 | `createArray` | `size?` | Empty array or pre-sized with nulls. **Never** use bare `[]` literal. |
-| `copyArray` | `array` | Deep copy — use before mutating. `setVariable` is an alias. |
+| `copyArray` | `array` | **Shallow** copy — a new array, but nested objects/Records are still shared references. Sufficient for the mutation guard (removing items while iterating); NOT sufficient to snapshot an array of Records for later comparison — `copyRecord` each element for that. `setVariable` is an alias, not a copy. |
 | `appendArrayItem` / `appendArrayItems` | `array`, `item` / `array`, `items` | Append one item or all items from src. |
 | `getArraySize` | `array` | Integer size. |
 | `getArrayItem` / `setArrayItem` | `array`, `index` | Read or write by index. |
@@ -950,7 +997,7 @@ JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline
 | `reverseArray` | `array` | Mutates in place. |
 | `sortArray` | `array`, `ascending?`, `ignoreCase?`, `keyFields?` | Full-featured sort. Prefer over JS `.sort()`. |
 | `joinArray` | `array`, `delimiter?` | Concatenate to string. Prefer over `arr.join()`. |
-| `sliceArray` | `array`, `startIndex`, `endIndex?` | Returns new subarray; original unchanged. |
+| `sliceArray` | `array`, `startIndex`, `endIndex?` | Returns new subarray; original unchanged. Shallow — nested objects still shared. |
 | `arrayContains` | `array`, `value` | Boolean membership test. |
 
 ### Record actions
@@ -1322,6 +1369,12 @@ Before delivering any XML:
 | `parseJSON` on malformed input | Auto-logs its own ERROR, returns `undefined`, does not abort — pre-gate with `isValidJSON` JS function for clean branching |
 | `JSON.parse(Global.jsonWrappedVar)` | Throws `SyntaxError` — a `json()` global is already a native value; reference it directly without parsing |
 | Running a bare, unsaved action via the MCP | `NullPointerException` in `compileActionDef` — save the action set first, then run by name; see `references/mcp-and-json.md` |
+| Expecting a failed built-in to throw | Built-ins never throw — they return `undefined`/`false` and set `lastErrorMessage`/`lastErrorCode`. Check return values; see § Built-in failure model |
+| Reading `getLastErrorMessage()` after an ERROR-level `log` | `log level="ERROR"` clears and **overwrites** `lastErrorMessage` with your own message — capture the platform error into a variable *before* logging it |
+| `loadFileAsString` producing mangled accented characters | Its default encoding is **LATIN1 (ISO-8859-1), not UTF-8** — pass the encoding arg explicitly for UTF-8 files; `saveToFile` defaults also differ by type (UTF-8 for XML, ISO-8859-1 for strings) |
+| Treating `getIdautoIDForUser`/`getIdautoIDForGroup` as read-only lookups | They **create the idautoID if missing** — calling one on the wrong DN mints a new immutable ID; not safe as an existence probe |
+| `copyArray` as a snapshot of an array of Records | `copyArray` is **shallow** — the Records inside are still shared; mutating them mutates the "snapshot". `copyRecord` each element |
+| Concatenating raw values into an LDAP filter | Use `stringEscape` with `escapeType="ldap-filter"` (or `ldap-dn` for DN parts) — unescaped `( ) * \` in user data breaks or injects into the filter |
 
 ---
 

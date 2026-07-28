@@ -238,7 +238,7 @@ With a regex pattern this is a match test, not literal equality.
 
 ---
 
-### `stringEscape` — HTML / URL / ECMAScript
+### `stringEscape` — 12 escape methods (HTML, URL, LDAP, SQL, CSV, …)
 
 **XML:**
 ```xml
@@ -256,7 +256,10 @@ With a regex pattern this is a match test, not literal equality.
 ]}
 ```
 
-`escapeType` values: `html`, `url`, `ecmascript`.
+`escapeType` values (12): `ecmascript`, `html`, `java`, `ldap-dn`, `ldap-filter`, `sql`, `mysql`,
+`postgresql`, `uri`, `url`, `xml`, `csv`. Input may be a string, array, or Record (values escaped
+element-wise). Use `ldap-filter` for values concatenated into LDAP search filters and `ldap-dn` for
+DN components — never build filters from raw user data.
 
 ---
 
@@ -326,9 +329,13 @@ Strips combining diacritics. Precomposed letters (Ø, Å) with no combining-form
 
 ---
 
-### `copyArray` — deep copy
+### `copyArray` — shallow copy (new array, shared elements)
 
 **Inline-JS temptation:** `setVariable copy = arr` — **alias, not a copy; mutations affect both**
+
+**Shallow:** the copy is a new array object, but nested objects/Records inside it are still shared
+references. Fine for the iterate-and-remove mutation guard; NOT a snapshot of an array of Records —
+`copyRecord` each element if the Records themselves will mutate. (`sliceArray` is shallow too.)
 
 **XML:**
 ```xml
