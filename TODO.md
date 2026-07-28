@@ -18,6 +18,19 @@ copy into `archive/`, and check off or remove the entry here.
 
 ## Processed
 
+- [x] 2026-07-28 mcp-rapidid alignment pass (v1.3.0): scanned the mcp-rapidid Go codebase +
+  ri-sdk-go v1.7.0 and updated the skill to cover the full tool surface — added
+  run-connect-action (returns the HTML job log; save → run → read log → fix loop),
+  get-connect-files / get-connect-file-content (verify Global.* keys against live
+  Globals/SharedGlobals.properties; read job/run logs via log/job & log/run paths; compressed
+  files buggy server-side), delete by project.name, `<Main>` project naming, companion identity
+  tools table (search-users, get-user-activity-from-audit-log for logAuditEvent verification,
+  etc.), and server env/auth troubleshooting (RI_HOST, RI_SERVICE_IDENTITY_SECRET_KEY,
+  RI_LOG_LEVEL). Note: mcp-rapidid bundles its own stale copy of this skill under skills/ —
+  consider syncing it or pointing that repo at this marketplace. (2026-07-28)
+
+## Processed
+
 - [x] 2026-07-28 knowledge-base reconciliation pass: corrected `copyArray` from "deep copy" to
   **shallow copy** (SKILL.md tables + cheatsheet § copyArray; nested Records still shared);
   expanded `stringEscape` from 3 to the full **12 escape types** incl. `ldap-filter`/`ldap-dn`/`csv`

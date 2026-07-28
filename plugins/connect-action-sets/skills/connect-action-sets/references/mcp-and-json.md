@@ -1,11 +1,13 @@
 # RapidIdentity Connect — MCP Workflow, JSON Object Model & XML ↔ JSON Conversion
 
-Read this when working against a live Connect instance via the `RapidIdentity MCP Server:*`
-tools, or when converting action sets between XML (file mode) and JSON (API model).
+Read this when working against a live Connect instance via the RapidID MCP Server
+(`mcp-rapidid`), or when converting action sets between XML (file mode) and JSON (API model).
 
 ## Contents
-- MCP Workflow — read/explore, design, push, delete
+- MCP Workflow — read/explore, design, push, delete, run & verify, project files
 - Editing Existing Action Sets via MCP — canonical-body method, the 400/500 failures, fallback
+- Companion identity tools — test data lookup and post-run verification
+- Server configuration — env vars, auth, troubleshooting
 - JSON Object Model — file JSON vs API JSON, argDef/action/arg shapes
 - XML ↔ JSON Conversion — field-by-field mapping in both directions
 - JSON Builtins (parseJSON / toJSON) - native values, key ordering, malformed handling, json() globals
@@ -15,7 +17,7 @@ tools, or when converting action sets between XML (file mode) and JSON (API mode
 
 ## MCP Workflow
 
-Use these operations when in API mode (`RapidIdentity MCP Server:*` tools available).
+Use these operations when in API mode (`mcp-rapidid` tools available).
 
 ### Read / Explore
 
@@ -80,8 +82,51 @@ from this skill when designing the structure.
 
 ### Delete
 
-- Use `delete-connect-action(id)`
+- Use `delete-connect-action(id)` — `id` accepts a UUID or `project.name`
 - **Always confirm with the user before executing** — deletion is irreversible
+
+### Run & Verify — `run-connect-action`
+
+`run-connect-action({action: {id, name, project, args}})` executes a **saved** action set and
+returns the **full HTML job log** as the result (`log` — the same content the Connect log
+viewer renders).
+
+- The action reference works like calling an action set from another action set: `name` +
+  `project` (or `id`), with `args` as `{name, value}` pairs matching the argDefs. Pass
+  `logOnly='true'` / `logLevel='debug'` args exactly as a caller would.
+- **The log IS the result.** Parse it for `ERROR` lines, the counts summary, and the action
+  set's return value. A clean save proves nothing — the log proves behavior. Expect HTML
+  markup (color spans) around the log text; strip or read through it.
+- Logs can be large for big jobs. For a quick verdict, search the log text for `ERROR`, `WARN`,
+  and the final counts line rather than reading it end-to-end.
+- After the run, verify any external writes through their own surface (LDAP record, audit log —
+  see Companion identity tools below), not just the log's say-so.
+
+### Project Files — `get-connect-files` / `get-connect-file-content`
+
+Read the Connect files module directly — no more guessing what a Global resolves to:
+
+- `get-connect-files({path, project})` — lists file/directory metadata **one level deep** at
+  `path` (name, size, timestamp, readable/writable). Walk directories by repeated calls.
+- `get-connect-file-content({path, project})` — returns a file's text content.
+- `project` defaults to the Main project when omitted; the Main project is also addressable
+  by the literal name `<Main>` (angle brackets included).
+
+**High-value uses:**
+
+1. **Verify Globals before referencing them.** Read `Globals.properties` (project) and
+   `SharedGlobals.properties` to confirm a `Global.<key>` exists and see its form
+   (`encrypt(...)` values are returned encrypted; `json(...)` values show their raw JSON).
+   The skill's `references/shared-globals.md` lists naming conventions — the tenant file is
+   the truth for what actually exists.
+2. **Read job/run logs after the fact.** Log files are reachable via `log/job/...` and
+   `log/run/...` paths — use this to pull the log of a scheduled job run that you didn't
+   trigger via `run-connect-action`.
+3. **Read scripts and data files** an action set consumes (CSV drop files, JS includes)
+   when diagnosing behavior.
+
+Caveat: avoid fetching compressed files — server-side decompression has a known bug in the
+underlying API. Fetch plain-text files individually.
 
 ---
 
@@ -203,6 +248,44 @@ once; any structural counter moved by the expected amount; a char-level diff sho
 intended regions changed; untouched metadata intact; no new non-ASCII in editor-facing strings
 (comments, `description`, labels stay plain ASCII; pre-existing non-ASCII elsewhere is fine to
 leave).
+
+---
+
+## Companion Identity Tools
+
+The same server exposes identity/portal tools. During Connect work they replace ad-hoc LDAP
+queries for two jobs: **finding test data before a run** and **verifying effects after a run**.
+
+| Tool | Connect-work use |
+|---|---|
+| `search-users` | Find a real user to run a `Fn*`/job against; confirm attribute values before and after |
+| `get-user-info-in-delegation` | Fuller profile view within a delegation; **accepts a raw LDAP filter passed verbatim** (access control is enforced server-side, so filters can be passed through without sanitizing) |
+| `search-groups` / `get-group-members` | Verify group-membership syncs actually landed (e.g. after `ManageGroupMembership`-style jobs) |
+| `get-user-activity-from-audit-log` | **Verify your `logAuditEvent` calls**: after a run that writes audit events, pull the target user's activity for the run window and confirm the events appear with the right eventName/target |
+| `get-password-policies-for` / `set-password` | Password-flow testing (set-password goes through delegations — confirm with the user before mutating) |
+| `search-entitlements-for-user` / `start-entitlement-request` / `get-my-delegations` | Portal/WFM context — e.g. kick off an entitlement request to exercise a WFM action set end-to-end (see the `rapididentity-workflows` skill) |
+
+Treat mutating tools (`set-password`, `start-entitlement-request`, `save-connect-action`,
+`delete-connect-action`, `run-connect-action` against a set that writes) with the same care as
+any live-tenant write: confirm target and intent with the user, prefer `logOnly='true'` first
+runs.
+
+---
+
+## Server Configuration (troubleshooting)
+
+`mcp-rapidid` is configured entirely by environment variables on the server process:
+
+| Variable | Meaning |
+|---|---|
+| `RI_HOST` | Tenant host (scheme optional; https assumed) |
+| `RI_SERVICE_IDENTITY_SECRET_KEY` | Service Identity auth — **preferred**; takes precedence when set |
+| `RI_USER` / `RI_PASSWORD` | Username/password auth — used only when no service identity key |
+| `RI_LOG_LEVEL` | slog level (`debug`, `info`, `warn`, `error`; default error) — set `debug` to see per-call request diagnostics on stderr |
+
+If every tool call fails identically, it's almost always auth/host config, not your payload:
+the server logs errors with `reason`/`method`/`reqUrl`/`code` from the RapidIdentity API —
+raise `RI_LOG_LEVEL` and read those before changing your request.
 
 ---
 

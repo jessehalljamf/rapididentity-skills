@@ -30,12 +30,32 @@ Detect which mode to use based on available tools and the user's request:
 
 | Context | Mode |
 |---|---|
-| `RapidIdentity MCP Server:*` tools are available and the user is working against a live Connect instance | **API mode** — use MCP tools |
+| RapidID MCP Server tools are available (server `mcp-rapidid`; tools like `get-connect-actions`, `save-connect-action`) and the user is working against a live Connect instance | **API mode** — use MCP tools |
 | Working with `.dssproject` files or XML strings on disk / in the conversation | **File mode** — use XML |
 | Both available | Follow what the user's request implies |
 
 **In API mode:** Always call `get-connect-projects` and `get-connect-actions` to orient before
-doing any design or editing work.
+doing any design or editing work. The full Connect tool set:
+
+| Tool | Use for |
+|---|---|
+| `get-connect-projects` | Discover projects |
+| `get-connect-actions` | List action sets (`project` filter, empty = all; `metaDataOnly: true` to skip bodies) |
+| `get-connect-action` | Fetch one action set (`id` = UUID or `project.name`) |
+| `save-connect-action` | Create/update (send the fetched `version` on update) |
+| `delete-connect-action` | Delete by id or `project.name` — **always confirm with the user first** |
+| `run-connect-action` | Run a **saved** action set; returns the HTML job log |
+| `get-connect-files` | List files/dirs in the Connect files module (one level per call) |
+| `get-connect-file-content` | Read a file — `Globals.properties`, `SharedGlobals.properties`, scripts, and **job/run logs** (`log/job`, `log/run` paths) |
+
+**The authoring loop in API mode is save → run → read log → fix.** After `save-connect-action`,
+verify with `run-connect-action` (or read the latest log via `get-connect-file-content`) instead
+of declaring success from a clean save — a green save only proves the body parsed.
+
+**Check Globals against the live tenant.** Before referencing `Global.<key>`, when in API mode,
+read the project's `Globals.properties` / `SharedGlobals.properties` with
+`get-connect-file-content` rather than guessing from `references/shared-globals.md` alone — the
+reference lists conventions; the tenant is the truth.
 
 **In file mode:** All existing XML authoring rules in this skill apply unchanged.
 
@@ -1584,11 +1604,15 @@ others only for the matching task. The SKILL.md body covers everything needed fo
 
 ## MCP Workflow
 
-The `RapidIdentity MCP Server:*` tools cover discovery and metadata: `get-connect-projects`,
-`get-connect-actions` (list/metadata), `get-connect-action` (single), `save-connect-action`, and
-`delete-connect-action` (always confirm before deleting).
+The RapidID MCP Server (`mcp-rapidid`) covers the full authoring loop: discovery
+(`get-connect-projects`, `get-connect-actions`, `get-connect-action`), write
+(`save-connect-action`, `delete-connect-action` — always confirm before deleting), execution
+(`run-connect-action` — returns the HTML job log), and project files
+(`get-connect-files`, `get-connect-file-content` — Globals/SharedGlobals, scripts, job/run logs).
+It also exposes identity tools (`search-users`, `search-groups`, `get-group-members`,
+`get-user-activity-from-audit-log`, …) useful for test data and post-run verification.
 
-**Full MCP workflow (read/explore, the JSON object model, and field-by-field XML ↔ JSON conversion
-rules) is in `references/mcp-and-json.md`.**
+**Full MCP workflow (read/explore, run-and-verify, file access, the JSON object model, and
+field-by-field XML ↔ JSON conversion rules) is in `references/mcp-and-json.md`.**
 
 ---
