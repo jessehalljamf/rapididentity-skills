@@ -10,7 +10,9 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $pluginsDir = Join-Path $repoRoot 'plugins'
 
 function Add-DirToZip($zip, $rootDir, $entryPrefix) {
-  Get-ChildItem $rootDir -Recurse -File | ForEach-Object {
+  # -Force: on SMB shares, dot-prefixed names (.claude-plugin) carry the DOS hidden
+  # attribute and would otherwise be silently skipped, shipping manifest-less bundles.
+  Get-ChildItem $rootDir -Recurse -File -Force | ForEach-Object {
     $rel = $_.FullName.Substring($rootDir.Length + 1) -replace '\\', '/'
     $entryName = if ($entryPrefix) { "$entryPrefix/$rel" } else { $rel }
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entryName) | Out-Null
