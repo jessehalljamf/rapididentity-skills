@@ -1,53 +1,86 @@
-# Connect Action Sets — Claude Skill
+# jamf-identity-plugins — RapidIdentity Claude Skills
 
-A Claude Code skill for authoring, reviewing, and refactoring **RapidIdentity Connect** action sets in XML.
+A Claude plugin **marketplace** for RapidIdentity work, containing three plugins (one skill
+each):
 
-## Installation
+| Plugin | Domain | Triggers on |
+|---|---|---|
+| `connect-action-sets` | Connect action set XML | Connect XML, `.dssproject`, action sets, suppressTrace, argDefs, scheduled jobs, CSV builds |
+| `rapididentity-workflows` | Portal workflows, entitlements, Requests module | workflow JSON, `%{}` variables, advancedDssAction, valuePairs, approvals, entitlement creation |
+| `generate-mr` | IDHub MR Language (Mapping Rule DSL) | `.mr` files, mapping/ingestion/policy/publication rules, PVP log triage |
 
-1. Download [`connect-action-sets.skill`](./connect-action-sets.skill)
-2. Place it in your Claude Code skills directory (typically `~/.claude/skills/`)
-3. The skill activates automatically when you work with Connect XML, `.dssproject` files, or ask Claude about RapidIdentity Connect
+The skills are kept as separate plugins deliberately: each has its own trigger vocabulary and
+loads only when relevant; cross-domain tasks trigger multiple skills together, and they
+cross-reference each other. (This repo began as the `connect-action-sets` skill only — the
+workflows and MR skills were consolidated in from their original standalone repos on
+2026-07-28.)
 
-## What It Does
+## Install
 
-Triggers when you:
-- Create, edit, or refactor Connect action sets (XML)
-- Ask about naming conventions, section structure, logging, counters, or argDefs
-- Reference a `.dssproject` file or paste Connect XML
-- Work against a live Connect instance via the RapidIdentity MCP server (API mode)
+### Claude Code (recommended)
 
-## Contents
-
-```
-connect-action-sets/
-├── SKILL.md                          # Core skill — XML rules, naming, patterns, templates
-└── references/
-    ├── connect-builtin-actions.json  # Full catalogue of built-in Connect actions
-    ├── connections.md                # Typed connection patterns (AD, Google, M365, LDAP, etc.)
-    ├── mcp-and-json.md               # MCP workflow, JSON object model, XML ↔ JSON conversion
-    ├── native-action-cheatsheet.md   # Task → builtin action → verified XML/MCP call lookup
-    ├── openldap-schema.md            # OpenLDAP / ID Store attribute reference
-    ├── oracle-fusion-hcm-api.md      # Oracle Fusion HCM — auth, Workers API, pagination
-    ├── ri-alternate-actions.md       # Alternate Action input/output contracts
-    ├── ri-connect-admin-api.md       # Connect admin REST API — trigger jobs, processes, files
-    ├── ri-sponsorship-api.md         # RapidIdentity Sponsorship API
-    ├── ri-start-portal-workflow.md   # startPortalWorkflow builtin — submitting WFM requests from Connect
-    ├── ri-workflow-variables.md      # Workflow variable substitution and WFM return contract
-    ├── shared-globals.md             # Standard SharedGlobals keys by category
-    └── skyward-qmlativ-api.md        # Skyward Qmlativ — auth, Custom API patterns
+```bash
+claude plugin marketplace add jessehalljamf/claude-connect-action-sets-skill
 ```
 
-## Quick Reference
+Then install any or all of: `connect-action-sets`, `rapididentity-workflows`, `generate-mr`
+(via `/plugin` or `claude plugin install <name>@jamf-identity-plugins`).
+
+Skills are namespaced by plugin: `/connect-action-sets:connect-action-sets`,
+`/rapididentity-workflows:rapididentity-workflows`, `/generate-mr:generate-mr`. Model
+auto-triggering from skill descriptions is unaffected by namespacing.
+
+For local testing: `claude --plugin-dir ./plugins/<plugin-name>`.
+
+### Claude Desktop / Cowork
+
+Upload the per-plugin bundles: [`connect-action-sets.plugin`](./connect-action-sets.plugin),
+[`rapididentity-workflows.plugin`](./rapididentity-workflows.plugin),
+[`generate-mr.plugin`](./generate-mr.plugin).
+
+### Claude.ai chat (per-skill upload)
+
+Chat installs skills individually: [`connect-action-sets.skill`](./connect-action-sets.skill),
+[`rapididentity-workflows.skill`](./rapididentity-workflows.skill),
+[`generate-mr.skill`](./generate-mr.skill).
+
+## Repo layout
+
+```
+.claude-plugin/marketplace.json        # the marketplace manifest
+plugins/
+├── connect-action-sets/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/connect-action-sets/    # SKILL.md + 13 references
+├── rapididentity-workflows/
+│   ├── .claude-plugin/plugin.json
+│   └── skills/rapididentity-workflows/  # SKILL.md + live-capture reference
+└── generate-mr/
+    ├── .claude-plugin/plugin.json
+    └── skills/generate-mr/            # SKILL.md + 3 references
+scripts/build.ps1                      # regenerates the root-level .skill/.plugin artifacts
+archive/                               # untracked pre-plugin skill snapshots
+TODO.md                                # skill-correction queue (see header for workflow)
+```
+
+## Build the distribution artifacts
+
+```powershell
+powershell -File scripts/build.ps1
+```
+
+Regenerates the root-level `.skill` and `.plugin` files from `plugins/`. Run after any skill
+edit, and bump the changed plugin's `version` in its `plugin.json` (marketplace consumers only
+receive updates on a version bump). Validate with `claude plugin validate ./plugins/<name>`.
+
+## Notable references inside the skills
 
 | Need | Location |
 |------|----------|
-| XML format rules, escaping, root element | `SKILL.md` § XML Format Rules |
-| Naming conventions and prefixes | `SKILL.md` § Naming Scheme |
-| Logging and counting patterns | `SKILL.md` § Logging / § Counting |
-| Full action set skeleton | `SKILL.md` § Skeleton Templates |
-| Validation checklist | `SKILL.md` § Validation Checklist |
-| Connection patterns by target system | `references/connections.md` |
-| All built-in actions | `references/connect-builtin-actions.json` |
-| Task → builtin → verified call lookup | `references/native-action-cheatsheet.md` |
-| MCP / live Connect workflow | `references/mcp-and-json.md` |
-| Starting a WFM workflow from Connect | `references/ri-start-portal-workflow.md` |
+| XML format rules, escaping, root element | `connect-action-sets` SKILL.md § XML Format Rules |
+| Full builtin-action catalogue (grep it, never load whole) | `connect-action-sets` `references/connect-builtin-actions.json` |
+| Task → builtin → verified call lookup | `connect-action-sets` `references/native-action-cheatsheet.md` |
+| Connection patterns by target system | `connect-action-sets` `references/connections.md` |
+| Workflow JSON ground truth (live tenant capture) | `rapididentity-workflows` `references/live-capture-request-sponsored-account.md` |
+| MR Language patterns and builtins | `generate-mr` `references/patterns.md`, `references/builtins.md` |
+| PVP log triage (logs can exceed 1GB — never read whole) | `generate-mr` `references/debugging-pvp-logs.md` |
