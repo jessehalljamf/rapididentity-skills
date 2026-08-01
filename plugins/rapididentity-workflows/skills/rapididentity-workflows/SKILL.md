@@ -407,12 +407,19 @@ POST /api/rest/admin/workflow/resources
 }
 ```
 
-**Binding values:**
+**Binding values** — exactly four, from `ResourceType.java:13-18`. **Fixed after creation.**
 
-| Value | Meaning |
-|---|---|
-| `MULTI_UNBOUND` | User can request multiple times; each request is independent |
-| `SINGLE_BOUND` | User can only hold one grant at a time |
+| Value | Meaning | Revocable? |
+|---|---|---|
+| `SINGLE` | One active grant per user. A duplicate request is **rejected**, not replaced (`WorkflowEngineDAO.groovy:528-531` routes to `shouldGrantSingleResource`; `StartWorkflowRequestValidator.groovy:204-218` throws `error.wfm_request.duplicate_request`). | Yes |
+| `MULTI_BOUND` | Multiple concurrent grants; each is tracked as its own association and can be revoked individually (`WorkflowEngineDAO.groovy:684-690` gives it a per-grant `REVOKED` end state). | Yes, per grant |
+| `MULTI_UNBOUND` | Multiple concurrent grants, but **no grant can ever be revoked** — any `REVOKE` throws `error.wfm_request.may_not_revoke` (`StartWorkflowRequestValidator.groovy:219-224`). Its end states omit `REVOKED` entirely (`WorkflowEngineDAO.groovy:670-676`). | **No** |
+| `ROLE` | Role-style entitlement. Deduplicates like `SINGLE` — same duplicate-request rejection (`StartWorkflowRequestValidator.groovy:205`). Has its own accessor `Resource.isRole()`. | Yes |
+
+> There is **no `SINGLE_BOUND`** and **no `COMPOSITE`** value — earlier versions of this skill listed
+> `SINGLE_BOUND`, which does not exist in the enum. Live tenant captures show `"binding":"ROLE"` and
+> `"SINGLE"` in practice. The wire field is `binding` (`Resource.groovy:82-85`,
+> `allowableValues = 'SINGLE,MULTI_BOUND,MULTI_UNBOUND,ROLE'`).
 
 > **ACLs are evaluated against the recipient.** The `acl` block above (and any category ACL) is
 > checked against the person the entitlement is *for*, not the person submitting the request
@@ -420,6 +427,31 @@ POST /api/rest/admin/workflow/resources
 > filter ACLs to the population that should **receive** the entitlement. A manager requesting for a
 > report gets `400 Entitlement '...' is not visible to '<report name>'` when the report falls
 > outside the ACL, even though the manager is inside it.
+
+### Step 4 (optional) — Expiration, Extend / Reset, Re-Certification
+
+Expiration is polymorphic on a `type` discriminator (`ResourceExpiration.groovy:31-44`):
+
+```jsonc
+"expiration": { "type": "timePeriod",  "timePeriod": { "days": 90 } }
+"expiration": { "type": "annualDate",  "annualDate": "--08-31", "reCertificationPeriodDays": 14 }
+```
+
+Related resource fields: `canRequestExtend`, `canRequestReset`, `extendWorkflowId`, `extendFormId`,
+`resetWorkflowId`, `resetFormId`, `disableCertification` (negative sense — certification is **on**
+by default).
+
+**Extend/reset only work on `timePeriod`.** `ResourceValidator.groovy:209-214` force-sets both
+`canRequestExtend` and `canRequestReset` to `false` on any non-`timePeriod` expiration.
+Re-certification works on both.
+
+**Extend and reset compute from different baselines** (`EndActionExecutor.groovy:272-277`):
+extend adds to the *current expiration*, reset adds to *now*. A grant expiring Sept 1, extended
+today (Aug 1) by 3 months → **Dec 1**; reset instead → **Nov 1**. Reset can therefore *shorten*
+access — it means "restart the clock," not "restore the original duration."
+
+Full detail, both extend endpoints, the re-certification (`reAttest`) endpoints, and the error
+reference: KB `rapididentity/requests/extend-reset-recertification.md`.
 
 ---
 
@@ -474,3 +506,9 @@ recipient parameter. Full detail: KB `rapididentity/requests/recipients-and-on-b
 | `approver.type: "managerApprover"` rejected | That type doesn't exist. Use `{ "type": "expressionApprover", "expression": "%{recipient.manager}" }`. |
 | Manager approval routed to the wrong person | On an on-behalf-of request, `%{requester.manager}` is the requesting manager's *own* manager. Use `%{recipient.manager}`. |
 | Connect action set can't see the recipient | Nothing is auto-injected — pass it explicitly, e.g. `recipientdn='%{recipient.dn}'`. |
+| `binding: "SINGLE_BOUND"` rejected | That value doesn't exist. The four real values are `SINGLE`, `MULTI_BOUND`, `MULTI_UNBOUND`, `ROLE`. |
+| Extend/Reset checkboxes unavailable on an entitlement | The expiration is `annualDate`. The validator force-sets `canRequestExtend`/`canRequestReset` to `false` on anything that isn't `timePeriod` — set a `timePeriod` expiration instead. |
+| Entitlement save throws on `extendFormId` | An extend form requires a paired `extendWorkflowId` (`ResourceValidator.groovy:574-579`), and the form must belong to that workflow definition. Same for reset. |
+| Extend applied with no approval | `extendWorkflowId` is missing, typo'd, or not `ACTIVE` — a bare Start→End stub runs instead and the date change commits **with no error**. Verify the ID resolves to an active definition. |
+| Extension shorter than requested | Silently clamped to the resource's configured max period at request time; the warning appears only in the response `message` field while `result` still returns a request ID. HTTP status stays 200. |
+| "Reset" shortened someone's access | Expected. Reset re-bases the expiration on **now**, so on a far-future expiration it moves the date *earlier*. Use extend to bank unused time. |
