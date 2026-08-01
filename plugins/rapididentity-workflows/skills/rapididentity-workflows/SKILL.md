@@ -32,39 +32,28 @@ email sends — and pass data between steps using `%{variable}` substitution.
 | Approval routing | § approvalAction |
 | Condition branching on dss.success | § conditionAction |
 | Email action HTML | § emailAction |
-| Forms — form list, per-step visibility, item types | § Workflow Forms |
 | Entitlement creation (3-step API) | § Entitlement Creation |
-| Binding types, Extend/Reset semantics | § Entitlement Creation → § Expiration, Extend, and Reset |
-| Ground-truth field names (live capture) | `references/live-capture-request-sponsored-account.md` |
 | Common mistakes | § Common Pitfalls |
 
 ---
 
 ## Workflow JSON Structure
 
-A workflow definition has two main arrays: `actions` (the directed graph) and `forms` (the form
-list — see § Workflow Forms). Each action has an `id`, `type`, `name`, and routing fields.
+A workflow is a flat array of action objects. Each action has an `id`, `type`, `name`, and
+routing fields that form the directed graph.
 
 ```json
 {
   "name": "My Workflow",
   "description": "One-sentence description.",
-  "status": "ACTIVE",
   "actions": [
     { "type": "startAction", "id": "start", "name": "Start Action", "nextActionId": "<first-action-id>" },
     { "type": "endAction",   "id": "end",   "name": "End Action" },
     { "type": "failAction",  "id": "<uuid>","name": "Failed", "nextActionId": "end" },
     ...
-  ],
-  "forms": [ ... ]
+  ]
 }
 ```
-
-Server-managed fields on an existing definition: `id` (UUID), `dn`, `version` (incremented by the
-server on each PUT — no optimistic locking; last writer wins). When updating via
-`PUT /api/rest/admin/workflow/workflowDefinitions/{id}`, the body **replaces the entire
-definition** — always GET first, modify in memory, then PUT, or you will silently drop fields
-(including the whole `forms` array).
 
 **Required actions** — every workflow must include exactly one `startAction`, one `endAction`,
 and at least one `failAction`. The `startAction.nextActionId` points to the first real step.
@@ -102,8 +91,7 @@ and at least one `failAction`. The `startAction.nextActionId` points to the firs
 ### `advancedDssAction`
 
 Calls a Connect action set and exposes its return value as `%{dss.*}` variables.
-See § advancedDssAction for full details (including the simpler `dssAction` variant with
-`resultValidationRegex`).
+See § advancedDssAction for full details.
 
 ### `approvalAction`
 
@@ -127,21 +115,31 @@ Workflow variables use `%{scope.field}` syntax and are resolved at runtime.
 
 ### Scopes
 
+The complete set of accepted prefixes is `resource`, `recipient`, `requestor`, `requester`,
+`addressee`, `approver`, `approval` (`WorkflowExpressions.java:51-58`), plus a fallthrough that
+resolves anything else — notably `dss.*` and `form.*` — from the request context. Matching is
+case-insensitive; `requestor` and `requester` are exact synonyms.
+
 | Scope | Contents |
 |---|---|
 | `%{form.*}` | Form field values submitted by the requester |
-| `%{request.*}` | Workflow request metadata (e.g. `%{request.comments}`, `%{request.id}`, `%{request.type}` = `GRANT`/`REVOKE`) |
-| `%{requester.*}` | Requester's RI account attributes (e.g. `%{requester.mail}`). `%{requestor.*}` is an accepted alternate spelling seen in production — prefer `requester` in new work |
-| `%{recipient.*}` | Recipient's RI account attributes (e.g. `%{recipient.dn}`) |
-| `%{addressee.*}` | Alternate subject in certain request types (e.g. `%{addressee.idautoID}`) |
-| `%{approvalN.*}` | Metadata from approval step N, **0-indexed** (e.g. `%{approval0.comments}`, `%{approval0.approver.dn}`) |
-| `%{approverN.*}` | Account attributes of the user who acted on approval step N (e.g. `%{approver0.mail}`) — distinct from `approvalN` |
+| `%{request.*}` | Workflow request metadata (e.g. `%{request.comments}`) |
+| `%{requester.*}` | Requester's RI account attributes (e.g. `%{requester.mail}`). On a **proxied** request this resolves to the proxy actor, not the stored requester |
+| `%{recipient.*}` | Recipient's RI account attributes (e.g. `%{recipient.dn}`) — the person the entitlement is *for* |
 | `%{resource.*}` | The entitlement being requested (e.g. `%{resource.name}`) |
-| `%{dss.*}` | Return fields from the most recent `advancedDssAction` call (`%{dss.result}` = raw return value) |
-| `%{grant.form.*}` | **Revoke workflows only** — form values from the original Grant request |
+| `%{addressee.*}` | The **current approval task's** addressee — not a request participant |
+| `%{approver0.*}` | The user who acted on the first approval step |
+| `%{approval0.*}` | Attributes from the first approval step (e.g. `%{approval0.comments}`) |
+| `%{dss.*}` | Return fields from the most recent `advancedDssAction` call |
 
-**Nested attribute navigation** — requester/recipient attributes support dot navigation to related
-objects: `%{recipient.manager.fullName}`, `%{recipient.manager.mail}`.
+Nested paths walk LDAP: `%{recipient.manager.mail}` fetches `manager` off the recipient's DN, then
+`mail` off that DN. `dn`, `id`, and `idautoid` are terminal (no LDAP lookup).
+
+> **Requester vs recipient.** These are separate identities on every request — a self-request is
+> just the case where they're equal. When a user requests *on behalf of* someone else, `recipient`
+> is the other person. Two consequences that bite: entitlement ACLs are evaluated against the
+> **recipient**, and `%{requester.manager}` is not `%{recipient.manager}`. See the KB article
+> `rapididentity/requests/recipients-and-on-behalf-of.md`.
 
 ### Common variables
 
@@ -191,21 +189,6 @@ into `%{dss.*}` variables.
 
 **`valuePairs` syntax** — each string is `paramName='value'` where the value is a literal or
 a `%{}` variable reference. Single quotes around the value are required.
-
-**`actionName` rules** — the Connect action set name is typed **exactly**: case-sensitive, no
-search, no autocomplete, and a typo fails only at runtime. For action sets in the MAIN project use
-the bare name; for any other project the format is `ProjectName.ActionSetName` (dot separator
-required).
-
-**Optional fields** — `dssUrl` (empty string = the local Connect instance; a remote RI URL is
-supported but rare), `username`, and `trace` (boolean; enables Connect execution tracing — useful
-while debugging, leave off in production).
-
-**Simple variant: `dssAction`** — same fields as `advancedDssAction` plus `resultValidationRegex`.
-Instead of exposing `%{dss.*}` for a follow-up `conditionAction`, the action set's raw return value
-must match the regex for the step to succeed. Use `advancedDssAction` + `conditionAction` when you
-need to branch on structured output; `dssAction` when a single pass/fail regex on the return value
-is enough.
 
 **Validate-only pattern** — to call the action set for validation without writing, add
 `"validateOnly='true'"` to the `valuePairs`. The `advancedDssAction` is then wired to a
@@ -258,20 +241,37 @@ Pauses the workflow and creates an approval task for the specified group or user
 }
 ```
 
-- `expirationDays: -1` means no expiration; a positive value expires the approval task after N days
-- `escalationDays: -1` means no escalation; with a positive value, add an `escalationApprover`
-  object (same shape as `approver`) that the task escalates to after N days
+- `expirationDays: -1` means no expiration
+- `escalationDays: -1` means no escalation
 - `onApproveId` and `onDenyId` route to different action nodes based on the decision
 - After the approval step resolves, `%{approval0.comments}` contains the approver's comments
 
-**`approver.type` values:**
+### Approver types — only three exist
 
-| Type | Resolves to |
+`Approver.groovy:40-44` registers exactly three Jackson subtypes:
+
+| `approver.type` | Shape |
 |---|---|
-| `groupApprover` | Any member of the referenced group (shown above) |
-| `userApprover` | A specific named user |
-| `managerApprover` | The requester's manager (LDAP `manager` attribute) |
-| `recipientApprover` | The recipient (target identity) of the request |
+| `userApprover` | `"user": { "id", "dn", "name" }` |
+| `groupApprover` | `"group": { "id", "dn", "name" }` |
+| `expressionApprover` | `"expression": "%{...}"` |
+
+> **There is no `managerApprover` or `recipientApprover`.** Both are commonly assumed (and were
+> wrongly documented in the KB until 2026-08-01) but neither exists in the codebase — posting either
+> fails Jackson subtype resolution. Route dynamically with `expressionApprover` instead.
+
+```json
+"approver": { "type": "expressionApprover", "expression": "%{recipient.manager}" }
+```
+
+| Intent | Expression |
+|---|---|
+| Recipient's manager (usual intent for on-behalf-of flows) | `%{recipient.manager}` |
+| Requester's manager | `%{requester.manager}` |
+| The recipient themself | `%{recipient}` |
+
+Pick deliberately — on an on-behalf-of request `%{requester.manager}` routes to the *requesting*
+manager's own manager, which is rarely what's wanted.
 
 ---
 
@@ -290,8 +290,7 @@ Pauses the workflow and creates an approval task for the specified group or user
 }
 ```
 
-Full `operation` enum: `EQUALS`, `NOT_EQUALS`, `MATCHES_ANY_REGEX`, `CONTAINS`, `STARTS_WITH`,
-`ENDS_WITH`, `IS_NULL`, `IS_NOT_NULL` (the last two ignore `operand2`).
+Standard operations: `MATCHES_ANY_REGEX`, `EQUALS`, `NOT_EQUALS`, `CONTAINS`.
 
 **`dss.success` check** — always use `MATCHES_ANY_REGEX` with `operand2: "true"` when branching
 on a DSS result. String equality checks on boolean-like values are unreliable.
@@ -309,21 +308,13 @@ on a DSS result. String equality checks on boolean-like values are unreliable.
   "toList": ["%{form.idautopersonhomeemail}"],
   "subject": "Welcome to RapidIdentity",
   "message": "<html>...</html>",
-  "isHtml": true,
-  "isCritical": false,
   "nextActionId": "<uuid>"
 }
 ```
 
 - `toList` is an array of addresses; supports `%{}` variable references
 - `message` is a full HTML string — inline all CSS, no external stylesheets
-- `isHtml: true` marks the body as HTML; `isCritical` defaults false
 - Workflow variables are substituted into the HTML at send time
-
-> **Field names live-confirmed 2026-07-28** against
-> `GET /api/rest/admin/workflow/workflowDefinitions/{id}` on the sandbox tenant ("Request
-> Sponsored Account" v4): `from` / `toList` / `subject` / `message` / `isHtml` / `isCritical`.
-> Some API docs show `to`/`body` instead — that shape is wrong; do not use it.
 
 ### Comments section HTML pattern
 
@@ -349,72 +340,6 @@ comments in a styled section matching the standard detail card layout:
 > **Important:** Only include the Approver Comments row in emails that fire **after** the
 > approval step. Emails triggered before approval (e.g. "Request Invalid") should include
 > only the Requester Comments row — `%{approval0.comments}` will be empty at that point.
-
----
-
-## Workflow Forms
-
-A workflow definition carries a **form list** — a `forms` array of zero or more named forms. A
-single workflow can define multiple forms, and the *entitlement* (resource) chooses which one to
-show per request type via its dropdowns: **Grant Workflow Form**, **Extend Workflow Form**,
-**Reset Workflow Form**, **Revoke Workflow Form**. Each dropdown is populated only with the forms
-defined inside the currently selected workflow — switching workflows resets the form choice. Left
-blank, no form is shown and the workflow runs without requester input.
-
-```json
-"forms": [
-  {
-    "id": "<uuid>",
-    "displayName": "Request Sponsored Account",
-    "workflowFormItems": [
-      {
-        "name": "givenname",
-        "displayName": "First Name",
-        "type": "STRING",
-        "hideFromRecipient": false,
-        "listElements": [],
-        "requiredActionIds": ["start", "<approval-action-id>"],
-        "editableActionIds": [],
-        "hiddenActionIds": []
-      },
-      {
-        "name": "idautopersonemployeetypes",
-        "displayName": "Account Type",
-        "type": "LIST",
-        "hideFromRecipient": false,
-        "listElements": [
-          { "displayValue": "Contractor", "value": "Contractor" },
-          { "displayValue": "Vendor", "value": "Vendor" }
-        ],
-        "requiredActionIds": ["start", "<approval-action-id>"],
-        "editableActionIds": [],
-        "hiddenActionIds": []
-      }
-    ]
-  }
-]
-```
-
-**Per-step visibility** — each form item lists the action-step ids where it is Required, Editable,
-or Hidden (`requiredActionIds` / `editableActionIds` / `hiddenActionIds`). Live-captured
-definitions list both `"start"` and the approval action's id in `requiredActionIds` (required at
-submission AND shown as required to the approver), and use `editableActionIds` for optional
-fields. Validation runs against the workflow's **Start action** specifically: missing required
-fields, or values submitted for non-editable fields, reject the request before the workflow runs.
-
-**Form item `type` values** — live-confirmed: `STRING`, `LIST` (with `listElements` of
-`{displayValue, value}` pairs — the submitted value is `value`), `DATE_TIME`, `ATTACHMENT`.
-API docs additionally list `INTEGER`, `BOOLEAN`, `USER`, `GROUP` (unverified). Note it is
-`DATE_TIME` (emits a full ISO 8601 timestamp — trim with `.substring(0,10)` before REST calls)
-and `ATTACHMENT`, not `DATE`/`FILE_ATTACHMENT` as some docs claim.
-
-**Referencing values** — form items are identified by `name` (live captures show no separate id
-field) and referenced in expressions as `%{form.<name>}`. Names must be unique within the
-workflow; duplicates cause unpredictable resolution.
-
-> **Round-trip warning:** because PUT replaces the whole definition, tooling that decodes a
-> definition through a model missing the `forms` field will silently strip every form on the next
-> save. Confirm forms survived after any programmatic update.
 
 ---
 
@@ -482,40 +407,54 @@ POST /api/rest/admin/workflow/resources
 }
 ```
 
-**Binding values** (per `Resource.groovy` — **fixed after creation**; changing requires
-delete + recreate, losing existing grants):
+**Binding values:**
 
-| Value | Meaning | Revocable? |
-|---|---|---|
-| `SINGLE` | One active grant per user; re-requesting replaces it | Yes |
-| `MULTI_BOUND` | Multiple grants, each tracked individually | Yes, individually |
-| `MULTI_UNBOUND` | Multiple grants, **not tracked individually** | **No — cannot have a Revoke Workflow** |
-| `COMPOSITE` | Container; requesting it auto-requests all child entitlements | Depends on children |
+| Value | Meaning |
+|---|---|
+| `MULTI_UNBOUND` | User can request multiple times; each request is independent |
+| `SINGLE_BOUND` | User can only hold one grant at a time |
 
-> An earlier version of this skill listed `SINGLE_BOUND` — the codebase enum is `SINGLE`. If a
-> tenant rejects `SINGLE`, check what an existing entitlement returns from
-> `GET /api/rest/admin/workflow/resources`.
+> **ACLs are evaluated against the recipient.** The `acl` block above (and any category ACL) is
+> checked against the person the entitlement is *for*, not the person submitting the request
+> (`StartWorkflowRequestValidator.groovy:317-327` → `ResourceVisibilityEvaluator`). Scope group and
+> filter ACLs to the population that should **receive** the entitlement. A manager requesting for a
+> report gets `400 Entitlement '...' is not visible to '<report name>'` when the report falls
+> outside the ACL, even though the manager is inside it.
 
-### Expiration, Extend, and Reset (Time-based entitlements)
+---
 
-An entitlement's **Expiration** is `None`, `Time-based` (expires N days after grant), or
-`Campaign-based`. With Time-based expiration, two more capabilities unlock on the resource:
-**Allow Entitlement to be Extended** and **Allow Entitlement to be Reset**, each with its own
-optional workflow + form dropdowns (Extend Workflow / Extend Workflow Form, Reset Workflow /
-Reset Workflow Form).
+## Submitting a Request (including on behalf of another user)
 
-| | Extend | Reset |
-|---|---|---|
-| New expiration | `currentExpiration + requestedPeriod` (additive) | `now + requestedPeriod` (restarts the clock) |
-| Cap | Clamped per request to the resource's configured period (a warning is returned) | Same |
+```
+POST /api/rest/workflow/tasks/startTask
+{ "requestItems": [ {
+    "type": "GRANT",
+    "recipientId": "<recipient idautoID>",
+    "resourceId": "<entitlementId>",
+    "comments": "Requested on behalf of new hire",
+    "requestForm": { "requestFormItems": [ { "name": "startDate", "value": "2026-08-15" } ] }
+} ] }
+```
 
-**Who may request** (either capability): the grant's recipient (self), the recipient's direct
-manager, or a user with `WFM_ADMIN`, `WFM_HELPDESK`, `ADMIN`, or `TENANT_ADMIN`. Requests are
-rejected if the association is inactive/already expired or the resource isn't Time-based.
+- Note the base path is `/api/rest/workflow/...` — **not** the `/api/rest/admin/workflow/...` used
+  by the definition/entitlement admin endpoints above.
+- `recipientId` is the **idautoID** (not a DN, not a UUID). Set it to another user for on-behalf-of;
+  the requester comes from the auth context and is never in the body.
+- `requestItems` is a list — one call can batch multiple recipients/resources.
+- `type` is `GRANT` or `REVOKE`; `REVOKE` also requires `previousRequestId`.
 
-**Blank/inactive workflow is fine** — the extension/reset still succeeds; the engine runs a
-minimal Start→End graph and sends a canned notification email. The workflow hook is for *custom*
-behavior, not required for the expiration change itself.
+**Who may request for whom** (`StartWorkflowRequestValidator.groovy:249-279`): a non-privileged
+requester may only target **themself or a direct report** (LDAP `manager` attribute).
+`ADMIN`, `TENANT_ADMIN`, `WFM_ADMIN`, and `WFM_HELPDESK` may request for anyone. There is nothing in
+between — arbitrary delegation requires one of those roles or a service-identity front-end.
+
+**Finding valid recipients:** use `GET /api/rest/workflow/directReports/searchTask?criteria=` and
+`GET /api/rest/workflow/directReports/users/{id}/associations` (which returns each resource with a
+`notRequestable` flag). Do **not** use `/users/searchTask` — it is an org-wide people search that is
+not filtered to users the caller may request for, so selections from it get rejected at submit time.
+
+There is no "what can I request for user X" endpoint; the requestables search endpoints take no
+recipient parameter. Full detail: KB `rapididentity/requests/recipients-and-on-behalf-of.md`.
 
 ---
 
@@ -530,9 +469,8 @@ behavior, not required for the expiration change itself.
 | Entitlement 400: Grant Workflow must be active | Set the workflow Status to **Active** before creating the entitlement resource. |
 | Welcome email going to wrong address | Check `toList` — the welcome email should target `%{form.idautopersonhomeemail}`, not `%{requester.mail}`. |
 | validateOnly step also sets approvercomments | Safe to include `approvercomments='%{approval0.comments}'` on the validate step — it will be empty and the action set's optional handling will skip it. |
-| DSS action silently does nothing / runtime error | `actionName` is case-sensitive with no autocomplete; non-MAIN projects need `ProjectName.ActionSetName` with the dot separator. |
-| PUT wiped the workflow's forms (or other fields) | PUT replaces the **entire** definition — GET, modify in memory, PUT. Confirm `forms` survived after any programmatic save. |
-| Revoke Workflow dropdown missing/rejected | MULTI_UNBOUND entitlements cannot have a Revoke Workflow — grants aren't individually tracked. Use MULTI_BOUND if revocation matters. |
-| Wrong binding chosen at creation | Binding is immutable — delete and recreate the entitlement (existing grants are lost). |
-| Deactivating a workflow to stop a request | INACTIVE only blocks *new* requests; in-flight requests run to completion. |
-| Extension request grants less time than asked | Requested period is clamped per request to the resource's configured Time-based period; also check Extend (additive) vs Reset (now + period) semantics. |
+| `400 Entitlement '...' is not visible to '...'` | The **recipient** doesn't match the entitlement's group/filter ACL. ACLs evaluate against the recipient, not the requester — re-scope the ACL to who should *receive* it. |
+| `403 You are not allowed to request entitlements for '...'` | The requester is neither the recipient nor their manager, and lacks `WFM_ADMIN`/`WFM_HELPDESK`/`ADMIN`/`TENANT_ADMIN`. |
+| `approver.type: "managerApprover"` rejected | That type doesn't exist. Use `{ "type": "expressionApprover", "expression": "%{recipient.manager}" }`. |
+| Manager approval routed to the wrong person | On an on-behalf-of request, `%{requester.manager}` is the requesting manager's *own* manager. Use `%{recipient.manager}`. |
+| Connect action set can't see the recipient | Nothing is auto-injected — pass it explicitly, e.g. `recipientdn='%{recipient.dn}'`. |
