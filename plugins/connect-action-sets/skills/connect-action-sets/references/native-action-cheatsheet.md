@@ -307,6 +307,9 @@ Strips combining diacritics. Precomposed letters (Ø, Å) with no combining-form
 
 **Inline-JS temptation:** `arr = []` — **bare `[]` literal fails the Connect expression compiler**
 
+**Also wrong:** `parseJSON('[]')`. It compiles, so nothing flags it, but `parseJSON` is a
+JSON-*string* parser, not a container constructor — seed an empty array with `createArray`.
+
 **XML:**
 ```xml
 <!-- empty -->

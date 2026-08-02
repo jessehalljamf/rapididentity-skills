@@ -103,7 +103,8 @@ Three rules about the indented form:
 | JavaScript & engine idioms — arrow fns, named fns, Set, filter, toJSON/parseJSON | § JavaScript & Engine Idioms |
 | Try/Catch — error handling via a JS function | § Try/Catch |
 | Built-in failure model — `getLastErrorMessage`/`getLastErrorCode`/`clearLastError`, log-ERROR side effect | § Built-in failure model |
-| **Records — `createRecord` not `parseJSON('{}')`, `setRecordFieldValue` not dotted `setVariable`, type preservation** | § Records - construction |
+| **Seeding an empty object or array — `createRecord` / `createArray`, never `parseJSON('{}')` / `parseJSON('[]')`** | § Records & arrays - construction |
+| **Setting a Record field — `setRecordFieldValue`, never a dotted `setVariable`; plus type preservation** | § Records & arrays - construction |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
 | Community Adapter (ca) authoring — naming, sessions, dependencies, param order | § Community Adapter (ca) Action Set Authoring |
@@ -304,7 +305,7 @@ It returns fully native JS values:
 **Never seed an empty container with `parseJSON`.** `parseJSON('{}')` does sidestep the bare-`{}`
 compile error, but it is the wrong tool: use the **`createRecord`** action for an empty object and
 **`createArray`** for an empty array. `parseJSON` is for parsing an actual JSON *string* and nothing
-else. See § Records - construction.
+else. See § Records & arrays - construction.
 
 **Malformed input does not abort the set.** `parseJSON` on invalid JSON auto-logs its own ERROR
 line (from the platform `json-actions.js`) and returns `undefined` - it does not throw. To branch
@@ -359,11 +360,15 @@ Prefer building a Record/object and calling `toJSON`. The string-concatenation p
 
 ---
 
-## Records — construction
+## Records & arrays — construction
 
-Two hard rules, both about using the Record actions instead of treating a Record like a JS object.
+Two hard rules, both about using the native container actions instead of treating a Record or an
+array like a plain JS value.
 
 ### 1. Build the container with `createRecord` / `createArray`, never `parseJSON`
+
+Applies equally to **objects and arrays** — `parseJSON('[]')` is exactly as wrong as
+`parseJSON('{}')`.
 
 ```xml
 <!-- WRONG: parseJSON is a JSON-string parser, not a container constructor -->
@@ -1094,7 +1099,7 @@ JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline
 
 | Action | Key args | Notes |
 |---|---|---|
-| `createArray` | `size?` | Empty array or pre-sized with nulls. **Never** use bare `[]` literal. |
+| `createArray` | `size?` | Empty array or pre-sized with nulls. **Never** use a bare `[]` literal, and **never** `parseJSON('[]')` — see § Records & arrays - construction. |
 | `copyArray` | `array` | **Shallow** copy — a new array, but nested objects/Records are still shared references. Sufficient for the mutation guard (removing items while iterating); NOT sufficient to snapshot an array of Records for later comparison — `copyRecord` each element for that. `setVariable` is an alias, not a copy. |
 | `appendArrayItem` / `appendArrayItems` | `array`, `item` / `array`, `items` | Append one item or all items from src. |
 | `getArraySize` | `array` | Integer size. |
@@ -1113,7 +1118,7 @@ JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline
 
 | Action | Key args | Notes |
 |---|---|---|
-| `createRecord` | — | Empty Record. `createRecordFromObject(obj)` from a JS object (values coerced to strings). |
+| `createRecord` | — | Empty Record — **never** `parseJSON('{}')`. `createRecordFromObject(obj)` builds from a JS object but **coerces every value to a string**; prefer `createRecord` + `setRecordFieldValue` to keep native types. See § Records & arrays - construction. |
 | `copyRecord` | `record` | Deep copy — always use before mutating. `setVariable` is an alias. |
 | `setRecordFieldValue` / `getRecordFieldValue` | `record`, `field`, `value?` | Single-field set/get. |
 | `setRecordFieldValues` / `getRecordFieldValues` | `record`, `field`, `values?` | Multi-valued field set/get. |
@@ -1448,7 +1453,7 @@ Before delivering any XML:
     `name` is `<var>.<field>` on a Record — these should be `createRecord`, `createArray`, and
     `setRecordFieldValue`. Check too that any Record whose values are compared strictly or used in
     arithmetic was **not** built with `createRecordFromObject`, which stringifies every value.
-    See § Records - construction
+    See § Records & arrays - construction
 
 ---
 
@@ -1465,8 +1470,8 @@ Before delivering any XML:
 | Opening a connection inside a function when a session was passed | Check `!session` first |
 | Using generic `openConnection` for AD, RI, Google, Portal | Non-CA: use `FnOpenConns`; CA: use the typed built-in — see `references/connections.md` |
 | XML written with pretty-print indentation | Flatten to single-line compact output |
-| Bare `{...}` or `[...]` literal in `setVariable value=` | Fails the JS compiler — seed with the `createRecord` / `createArray` actions; see § Records - construction and `references/native-action-cheatsheet.md` |
-| `parseJSON('{}')` / `parseJSON('[]')` to seed an empty container | Never do this — `parseJSON` parses JSON *strings*. Use `createRecord` (object) / `createArray` (array). See § Records - construction |
+| Bare `{...}` or `[...]` literal in `setVariable value=` | Fails the JS compiler — seed with the `createRecord` / `createArray` actions; see § Records & arrays - construction and `references/native-action-cheatsheet.md` |
+| `parseJSON('{}')` / `parseJSON('[]')` to seed an empty container | Never do this — `parseJSON` parses JSON *strings*. Use `createRecord` (object) / `createArray` (array). See § Records & arrays - construction |
 | `setVariable name="rec.field"` to set a Record field | Use `setRecordFieldValue` (`record`/`field`/`value`); `setRecordFieldValues` for multi-valued. Dot notation is for *reading* |
 | `createRecordFromObject` for a Record whose values get compared or added | It stringifies every value — `true` → `"true"` (truthy!), `50` → `"50"` (fails `!== 100`). Build with `createRecord` + `setRecordFieldValue` to keep native types |
 | Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare metacharacters make the XML ill-formed before the JS compiler runs |
