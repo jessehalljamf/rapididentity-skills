@@ -467,8 +467,9 @@ the platform `json-actions.js` and are the preferred replacements for `JSON.pars
 
 - **`parseJSON` returns native JS values** - objects (dot/bracket/nested access), real arrays
   (`Array.isArray` true; `.length`, indexing, `.map`, arithmetic), top-level scalars
-  (`parseJSON('42')` -> number), `null`, and preserved unicode. Seed an empty object with
-  `parseJSON('{}')`.
+  (`parseJSON('42')` -> number), `null`, and preserved unicode. **Do not use it to seed an empty
+  container** - an empty object is the `createRecord` action, an empty array is `createArray`.
+  `parseJSON` is for parsing an actual JSON string.
 - **Malformed input does not abort** - `parseJSON` auto-logs its own ERROR (json-actions.js) and
   returns `undefined`. Pre-gate with an `isValidJSON` (try/catch around native `JSON.parse`) guard
   when you need clean branching without the noisy auto-error.

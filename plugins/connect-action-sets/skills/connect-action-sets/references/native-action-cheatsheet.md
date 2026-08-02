@@ -644,6 +644,9 @@ Note: `&&`, `<`, `>` are written as-is in JSON values (`filter(x => !setB.has(x)
 
 **Inline-JS temptation:** `obj = {}` — **bare `{}` literal fails the Connect expression compiler**
 
+**Also wrong:** `parseJSON('{}')`. It compiles, but `parseJSON` is a JSON-*string* parser, not a
+container constructor — use `createRecord` for an empty object and `createArray` for an empty array.
+
 **XML:**
 ```xml
 <action id="UUID" name="createRecord" outputVar="rec" disabled="false"/>
@@ -662,7 +665,9 @@ Note: `&&`, `<`, `>` are written as-is in JSON values (`filter(x => !setB.has(x)
 ]}
 ```
 
-`createRecordFromObject` coerces all values to strings — boolean `true` becomes `"true"`.
+`createRecordFromObject` coerces all values to strings — boolean `true` becomes `"true"`, number `50`
+becomes `"50"`. `createRecord` + `setRecordFieldValue` preserves native types. Prefer the latter for any
+Record whose values are compared strictly (`"false"` is truthy; `"50" !== 50`) or used in arithmetic.
 
 ---
 

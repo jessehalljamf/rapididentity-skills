@@ -59,6 +59,30 @@ reference lists conventions; the tenant is the truth.
 
 **In file mode:** All existing XML authoring rules in this skill apply unchanged.
 
+### Reading an existing action set — pretty-print first
+
+Action-set files are stored as **one very long single line** (the format the platform requires). That
+is unreadable, and reasoning about nesting from it is where structural mistakes come from. Before
+analysing a single-line file, render an indented copy and read that:
+
+```bash
+xmllint --format path/to/ActionSet.xml
+```
+
+Three rules about the indented form:
+
+1. **It is a read-only view. Never write it back.** The file on disk must stay compact single-line
+   (§ XML Format Rules). `xmllint --format` also prepends an `<?xml version="1.0"?>` declaration,
+   which this skill forbids — one more reason the pretty output is scratch, never the saved artifact.
+2. **`Edit` / `Write` `old_string` must match the real file's bytes, not the indentation you read.**
+   In the real file a whole `<action …><arg …/></action>` is contiguous on one line; in the indented
+   view it spans many lines, so a multi-element snippet copied from the view **will not match**.
+   Anchor edits on a single `<arg …/>` line or a single attribute (those are identical in both
+   forms), or re-read the raw file before composing the edit.
+3. **A `PostToolUse` hook may already be doing this for you.** If `Read` returns an indented
+   action set with a `[hook: connect-xml-pretty]` banner, the pretty-printing has been applied to the
+   *display only* — the same two rules above still apply, and the file on disk is untouched.
+
 ---
 
 ## Quick Reference
@@ -79,6 +103,7 @@ reference lists conventions; the tenant is the truth.
 | JavaScript & engine idioms — arrow fns, named fns, Set, filter, toJSON/parseJSON | § JavaScript & Engine Idioms |
 | Try/Catch — error handling via a JS function | § Try/Catch |
 | Built-in failure model — `getLastErrorMessage`/`getLastErrorCode`/`clearLastError`, log-ERROR side effect | § Built-in failure model |
+| **Records — `createRecord` not `parseJSON('{}')`, `setRecordFieldValue` not dotted `setVariable`, type preservation** | § Records - construction |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
 | Community Adapter (ca) authoring — naming, sessions, dependencies, param order | § Community Adapter (ca) Action Set Authoring |
@@ -276,7 +301,10 @@ It returns fully native JS values:
 <action name="parseJSON" outputVar="parsed"><arg name="json" value="payload"/></action>
 ```
 
-Seed an empty object with `parseJSON('{}')` (sidesteps the bare `{}` literal compile error).
+**Never seed an empty container with `parseJSON`.** `parseJSON('{}')` does sidestep the bare-`{}`
+compile error, but it is the wrong tool: use the **`createRecord`** action for an empty object and
+**`createArray`** for an empty array. `parseJSON` is for parsing an actual JSON *string* and nothing
+else. See § Records - construction.
 
 **Malformed input does not abort the set.** `parseJSON` on invalid JSON auto-logs its own ERROR
 line (from the platform `json-actions.js`) and returns `undefined` - it does not throw. To branch
@@ -321,11 +349,72 @@ Prefer building a Record/object and calling `toJSON`. The string-concatenation p
 | Serialise any object / array / Record | `toJSON(obj)` (action with `outputVar`, or inline) |
 | Pretty / indented output | `toJSON(obj, true)` - 4-space indent |
 | Parse a JSON string | `parseJSON(str)` (action) - returns a native value |
-| Seed an empty object | `parseJSON('{}')` |
+| Seed an empty object | **`createRecord`** action - never `parseJSON('{}')` |
+| Seed an empty array | **`createArray`** action - never `parseJSON('[]')` or bare `[]` |
+| Set a field on a Record | **`setRecordFieldValue`** action - never `setVariable name="rec.field"` |
 | Reference a `json()` Global | `Global.X` directly - already native, never parse |
 | Accumulated object -> serialise | `toJSON(obj)` (overflow risk is specific to Java-wrapped objects, not plain Records) |
 | Assemble pre-serialised fragments | String-concatenation fallback (above) |
 | String constant containing `"` | Single-quote outer delimiter: `'&quot;key&quot;:value'` |
+
+---
+
+## Records — construction
+
+Two hard rules, both about using the Record actions instead of treating a Record like a JS object.
+
+### 1. Build the container with `createRecord` / `createArray`, never `parseJSON`
+
+```xml
+<!-- WRONG: parseJSON is a JSON-string parser, not a container constructor -->
+<action name="parseJSON" outputVar="rec"><arg name="json" value="'{}'"/></action>
+<action name="parseJSON" outputVar="list"><arg name="json" value="'[]'"/></action>
+
+<!-- RIGHT -->
+<action name="createRecord" outputVar="rec"/>
+<action name="createArray" outputVar="list"/>
+```
+
+`parseJSON('{}')` "works" — which is exactly why it spreads — but it misuses a parser to dodge the
+bare-`{}` compile error, and it yields a plain JS object rather than a Record, so the Record actions
+(`setRecordFieldValue`, `hasRecordField`, `copyRecord`, `recordEquals`) are no longer the natural way
+to work with it. Reach for the constructor that matches the type you want. Bare `{}` / `[]` literals
+remain a compile error (§ setVariable Expression Compiler Rules); `createRecord` / `createArray` are
+the answer to that, not `parseJSON`.
+
+### 2. Set fields with `setRecordFieldValue`, never a dotted `setVariable`
+
+```xml
+<!-- WRONG: pokes a field by dotted variable name, bypassing the Record API -->
+<action name="setVariable"><arg name="name" value="row.seq"/><arg name="value" value="rowSeq"/></action>
+<action name="setVariable"><arg name="name" value="row.jobCode"/><arg name="value" value="fieldJobCode"/></action>
+
+<!-- RIGHT -->
+<action name="setRecordFieldValue"><arg name="record" value="row"/><arg name="field" value="&quot;seq&quot;"/><arg name="value" value="rowSeq"/></action>
+<action name="setRecordFieldValue"><arg name="record" value="row"/><arg name="field" value="&quot;jobCode&quot;"/><arg name="value" value="fieldJobCode"/></action>
+```
+
+Dot notation *reads* fine on a Record (`row.seq` returns the value, per § String & Record Built-in
+Actions), and the dotted-`setVariable` form usually assigns without complaint. Use the action anyway:
+it is the documented setter, it keeps the field name a real quoted string (so a name with a `-` or `@`
+needs no special handling), and it reads as a Record operation in the editor and in a trace instead of
+as a variable assignment that happens to contain a dot. For a multi-valued field use
+`setRecordFieldValues` with `values`.
+
+### Type preservation — why this matters beyond style
+
+`createRecord` + `setRecordFieldValue` **preserves the native JS type** of each value: assign a number
+and it stays a number, assign `true` and `typeof` reports `boolean`.
+
+**`createRecordFromObject` does not** — it coerces every value to a string, so `true` becomes `"true"`
+and `50` becomes `"50"`. It is a convenience for seeding from an existing object, not the safe default.
+
+This is a correctness issue wherever a caller compares strictly or does arithmetic. A `percentTotal`
+built through a string-coercing path fails `percentTotal !== 100` even when the value is right, and an
+`ok` flag becomes the string `"false"`, which is **truthy**. If a Record's values are consumed by
+anything other than string concatenation, build it with `createRecord` + `setRecordFieldValue` and
+keep `createRecordFromObject` for the string-map case. (Verified 2026-06-28; see the knowledge-base
+article `rapididentity/connect/connect-library/records-json.md`.)
 
 ---
 
@@ -1337,8 +1426,8 @@ Before delivering any XML:
 11. **All `argDef` elements** have a `description` attribute
 12. **`logAuditEvent` called** after every write to an external system (`targetID` = idautoID, `extendedProperties` = the record)
 13. **Structured data is serialised with `toJSON(obj)`** (not `JSON.stringify`); bare `{...}` /
-    `[...]` literals still fail the compiler in a `setVariable value=` - seed with `parseJSON('{}')`
-    / `parseJSON('[]')` or build a Record
+    `[...]` literals still fail the compiler in a `setVariable value=` - seed with the
+    **`createRecord`** / **`createArray`** actions, never `parseJSON('{}')` / `parseJSON('[]')`
 14. **String constants containing `"` use single-quote delimiters** — `'&quot;key&quot;:value'`
     not `&quot;\\&quot;key\\&quot;:&quot;value&quot;` (prefer single-quote delimiters; a literal backslash must be doubled — see § String escapes)
 15. **Every `<action>` has `id` (uppercase UUID) and `disabled="false"`** — missing these makes
@@ -1354,6 +1443,12 @@ Before delivering any XML:
     onto the parent `if`. Fix: make the nested block the last element of its container, or flatten
     to ternary `setVariable`s. After any MCP save, re-fetch and confirm the `version` incremented
     (a client timeout does not mean the save failed)
+19. **No `parseJSON` used as a container constructor, and no dotted `setVariable` writing a Record
+    field.** Grep for `parseJSON` with a `'{}'` / `'[]'` argument, and for `setVariable` whose
+    `name` is `<var>.<field>` on a Record — these should be `createRecord`, `createArray`, and
+    `setRecordFieldValue`. Check too that any Record whose values are compared strictly or used in
+    arithmetic was **not** built with `createRecordFromObject`, which stringifies every value.
+    See § Records - construction
 
 ---
 
@@ -1370,7 +1465,10 @@ Before delivering any XML:
 | Opening a connection inside a function when a session was passed | Check `!session` first |
 | Using generic `openConnection` for AD, RI, Google, Portal | Non-CA: use `FnOpenConns`; CA: use the typed built-in — see `references/connections.md` |
 | XML written with pretty-print indentation | Flatten to single-line compact output |
-| Bare `{...}` or `[...]` literal in `setVariable value=` | Fails the JS compiler — seed empty containers with `parseJSON('{}')` / `parseJSON('[]')`; build objects with `createRecord`; see `references/native-action-cheatsheet.md` |
+| Bare `{...}` or `[...]` literal in `setVariable value=` | Fails the JS compiler — seed with the `createRecord` / `createArray` actions; see § Records - construction and `references/native-action-cheatsheet.md` |
+| `parseJSON('{}')` / `parseJSON('[]')` to seed an empty container | Never do this — `parseJSON` parses JSON *strings*. Use `createRecord` (object) / `createArray` (array). See § Records - construction |
+| `setVariable name="rec.field"` to set a Record field | Use `setRecordFieldValue` (`record`/`field`/`value`); `setRecordFieldValues` for multi-valued. Dot notation is for *reading* |
+| `createRecordFromObject` for a Record whose values get compared or added | It stringifies every value — `true` → `"true"` (truthy!), `50` → `"50"` (fails `!== 100`). Build with `createRecord` + `setRecordFieldValue` to keep native types |
 | Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare metacharacters make the XML ill-formed before the JS compiler runs |
 | `setVariable` to copy a Record or extract from results array | Use `copyRecord` — `setVariable` aliases, not copies; mutation on one affects both. Applies to snapshots, `results[0]` extraction, and loop guards |
 | `setVariable` to copy an array before removing items in a loop | Use `copyArray` — same alias problem; mutating the array being iterated breaks `forEach` |

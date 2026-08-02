@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Plugins for Jamf Identity products (RapidIdentity): Connect action sets, portal workflows and entitlements, and IDHub MR Language.",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
