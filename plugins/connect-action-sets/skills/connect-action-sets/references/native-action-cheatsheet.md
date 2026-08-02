@@ -1404,7 +1404,7 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 ]}
 ```
 
-Arg names are `variable` and `collection` — never `item`/`items`. Add `{"name":"label","value":"LoopName"}` for labeled loops.
+Arg names are `variable` and `collection` — never `item`/`items`. Add `{"name":"label","value":"LoopName"}` for labeled loops — `label` is `type="name"`, so in XML it's `<arg name="label" value="LoopName"/>`, never `value="&quot;LoopName&quot;"`. Same for `while`/`continue`/`break`'s `label`. See § Section Labels in SKILL.md.
 
 ---
 

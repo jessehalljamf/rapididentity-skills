@@ -94,6 +94,7 @@ Three rules about the indented form:
 | String escapes (`\\`, `\"`, `\n`, `\t`, `\uXXXX`) | § setVariable Expression Compiler Rules |
 | setVariable vs copyRecord — reference vs deep copy, array mutation rule | § setVariable vs copyRecord |
 | Naming (prefixes, camelCase, reserved labels) | § Naming Scheme |
+| **`label` quoting — bare on `section`/`forEach`/`while`/`continue`/`break`, quoted only on `caFnLog`** | § Section Labels |
 | `about` section content (verbose Purpose + pseudo-code, plain ASCII) | § about Section |
 | `defineDefaultVariables` content | § defineDefaultVariables Section |
 | Logging — built-in `log` action | § Logging |
@@ -576,6 +577,25 @@ human-facing report, it's a `Report`.
 - **Never** name a section label the same as a Connect built-in action or reserved variable
   - `return` is forbidden → use `returnSuccess`, `returnRecord`, `returnResult`, etc.
   - `log`, `section`, `if`, `forEach` are also forbidden as section labels
+- **Never quote a `label` value — write the bare identifier, no `&quot;...&quot;`.** `label` is
+  `type="name"` on `section`, `forEach`, `while`, `continue`, and `break` — a bare token, not a JS
+  expression:
+  ```xml
+  <!-- RIGHT -->
+  <arg name="label" value="checkExcludedDomain"/>
+  <!-- WRONG: the label becomes the literal text "checkExcludedDomain", quote characters included -->
+  <arg name="label" value="&quot;checkExcludedDomain&quot;"/>
+  ```
+  **Do not generalize this to every `label` arg by name** — `caFnLog`'s `label` parameter is
+  `type="string"` (an expression), so it *is* quoted like any other string literal:
+  `<arg name="label" value="&quot;fetchAllUsers&quot;"/>`. Same argument name, different `type`,
+  opposite quoting rule. Before quoting or not quoting a `label`, check the owning action:
+  `section`/`forEach`/`while`/`continue`/`break` → bare; `caFnLog` → quoted. When unsure of a
+  new or unfamiliar action's `label` type, `lookup_action` it rather than guessing from a nearby
+  example. The validator does not catch a wrongly-quoted `name`-type `label` — it exempts `label`
+  from expression checking entirely, so this passes `build`/`validate` clean while still being wrong.
+  This is the same `type="name"` rule that governs `setVariable`'s `name` arg and `forEach`'s
+  `variable` arg — none of those are ever quoted either.
 
 ### Description Template
 
@@ -1462,6 +1482,7 @@ Before delivering any XML:
 | Pitfall | Fix |
 |---|---|
 | Section label `return` | Rename to `returnSuccess`, `returnRecord`, etc. |
+| `&quot;quoted&quot;` value on `section`/`forEach`/`while`/`continue`/`break`'s `label` arg | Write the bare identifier — `label` is `type="name"` on these, not an expression. The validator does not catch this (it exempts `label` from expression checking), so it passes clean while the label literally contains quote characters. `caFnLog`'s `label` is the one exception — that one IS `type="string"` and does get quoted. See § Section Labels |
 | Hardcoded base DNs or hostnames | Use `Global.*` references |
 | `SharedGlobal.` prefix in an action set | Reference every global as `Global.variableName` — `SharedGlobal.` is never used in action set expressions |
 | `builtIn="false"` on user action set | Remove the attribute entirely |
