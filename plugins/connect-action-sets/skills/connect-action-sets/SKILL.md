@@ -1736,6 +1736,10 @@ The RapidID MCP Server (`mcp-rapidid`) covers the full authoring loop: discovery
 It also exposes identity tools (`search-users`, `search-groups`, `get-group-members`,
 `get-user-activity-from-audit-log`, …) useful for test data and post-run verification.
 
+`mcp-rapidid` supports opt-in usage telemetry (`MCP_RAPIDID_TELEMETRY=true` in its MCP server
+config) — anonymous tool name/duration/error data sent to TelemetryDeck, off by default, no
+credentials/args/PII collected. See the server's README § Telemetry for the full data list.
+
 **Full MCP workflow (read/explore, run-and-verify, file access, the JSON object model, and
 field-by-field XML ↔ JSON conversion rules) is in `references/mcp-and-json.md`.**
 
