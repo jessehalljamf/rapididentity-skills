@@ -1,2 +1,4 @@
 .DS_Store
 archive/
+scripts/build.ps1
+__pycache__/
