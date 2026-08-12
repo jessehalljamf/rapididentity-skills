@@ -7,5 +7,5 @@
     "email": "jesse.hall@jamf.com"
   },
   "keywords": ["rapidIdentity", "workflows", "requests", "entitlements", "rapidid", "approval"],
-  "repository": "https://github.com/jessehalljamf/claude-connect-action-sets-skill/tree/main/plugins/rapididentity-workflows"
+  "repository": "https://github.com/jessehalljamf/rapididentity-skills/tree/main/plugins/rapididentity-workflows"
 }

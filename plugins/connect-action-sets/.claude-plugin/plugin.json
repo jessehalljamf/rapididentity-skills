@@ -7,5 +7,5 @@
     "email": "jesse.hall@jamf.com"
   },
   "keywords": ["rapidIdentity", "connect", "action set", "rapidid", "workflow"],
-  "repository": "https://github.com/jessehalljamf/claude-connect-action-sets-skill/tree/main/plugins/connect-action-sets"
+  "repository": "https://github.com/jessehalljamf/rapididentity-skills/tree/main/plugins/connect-action-sets"
 }
