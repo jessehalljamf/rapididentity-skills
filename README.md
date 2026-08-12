@@ -20,7 +20,7 @@ workflows and MR skills were consolidated in from their original standalone repo
 ### Claude Code (recommended)
 
 ```bash
-claude plugin marketplace add jessehalljamf/claude-connect-action-sets-skill
+claude plugin marketplace add jessehalljamf/rapididentity-skills
 ```
 
 Then install any or all of: `connect-action-sets`, `rapididentity-workflows`, `generate-mr`

@@ -7,5 +7,5 @@
     "email": "jesse.hall@jamf.com"
   },
   "keywords": ["rapidIdentity", "idhub", "mr", "mapping rule", "pvp", "rapidid"],
-  "repository": "https://github.com/jessehalljamf/claude-connect-action-sets-skill/tree/main/plugins/generate-mr"
+  "repository": "https://github.com/jessehalljamf/rapididentity-skills/tree/main/plugins/generate-mr"
 }
