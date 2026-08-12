@@ -15,6 +15,13 @@ cross-reference each other. (This repo began as the `connect-action-sets` skill 
 workflows and MR skills were consolidated in from their original standalone repos on
 2026-07-28.)
 
+## Related tooling
+
+These skills pair with [`mcp-rapidid`](https://github.com/Jamf-Concepts/mcp-rapidid), a separate
+Jamf-Concepts MCP server for live-tenant RapidIdentity operations (user search, entitlements,
+groups, audit logs). It's a standalone MCP server, not a plugin in this marketplace — install it
+per its own README.
+
 ## Install
 
 ### Claude Code (recommended)
@@ -38,11 +45,18 @@ Upload the per-plugin bundles: [`connect-action-sets.plugin`](./connect-action-s
 [`rapididentity-workflows.plugin`](./rapididentity-workflows.plugin),
 [`generate-mr.plugin`](./generate-mr.plugin).
 
+There is no slash-command invocation in Desktop/Cowork — that syntax is Claude Code-only. Skills
+here auto-trigger purely from matching the skill's description against your request; just
+describe the task naturally (e.g. mention Connect XML or a `.dssproject` file) and Claude loads
+the relevant skill on its own.
+
 ### Claude.ai chat (per-skill upload)
 
 Chat installs skills individually: [`connect-action-sets.skill`](./connect-action-sets.skill),
 [`rapididentity-workflows.skill`](./rapididentity-workflows.skill),
 [`generate-mr.skill`](./generate-mr.skill).
+
+Same as Desktop — no manual invocation syntax; skills auto-trigger from the description match.
 
 ## Repo layout
 
@@ -62,16 +76,6 @@ scripts/build.ps1                      # regenerates the root-level .skill/.plug
 archive/                               # untracked pre-plugin skill snapshots
 TODO.md                                # skill-correction queue (see header for workflow)
 ```
-
-## Build the distribution artifacts
-
-```powershell
-powershell -File scripts/build.ps1
-```
-
-Regenerates the root-level `.skill` and `.plugin` files from `plugins/`. Run after any skill
-edit, and bump the changed plugin's `version` in its `plugin.json` (marketplace consumers only
-receive updates on a version bump). Validate with `claude plugin validate ./plugins/<name>`.
 
 ## Notable references inside the skills
 
