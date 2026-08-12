@@ -39,6 +39,12 @@ auto-triggering from skill descriptions is unaffected by namespacing.
 
 For local testing: `claude --plugin-dir ./plugins/<plugin-name>`.
 
+`connect-action-sets` also bundles Claude Code hooks for navigating minified Connect XML
+(pretty-printed sidecar on `Read`, well-formedness check after `Edit`/`Write`, a `Grep` guard
+against single-line context bombs) — these auto-install with the plugin, no manual setup. If your
+project runs JUnit/Gradle tests, set `CONNECT_HOOKS_PROJECT_PACKAGE` (e.g. `net.idauto`) so
+test-failure summaries filter stack frames to your package.
+
 ### Claude Desktop / Cowork
 
 Upload the per-plugin bundles: [`connect-action-sets.plugin`](./connect-action-sets.plugin),
@@ -65,6 +71,7 @@ Same as Desktop — no manual invocation syntax; skills auto-trigger from the de
 plugins/
 ├── connect-action-sets/
 │   ├── .claude-plugin/plugin.json
+│   ├── hooks/                         # hooks.json + minified-XML read/grep guards, edit validator
 │   └── skills/connect-action-sets/    # SKILL.md + 13 references
 ├── rapididentity-workflows/
 │   ├── .claude-plugin/plugin.json
@@ -72,7 +79,6 @@ plugins/
 └── generate-mr/
     ├── .claude-plugin/plugin.json
     └── skills/generate-mr/            # SKILL.md + 3 references
-scripts/build.ps1                      # regenerates the root-level .skill/.plugin artifacts
 archive/                               # untracked pre-plugin skill snapshots
 TODO.md                                # skill-correction queue (see header for workflow)
 ```
