@@ -14,7 +14,33 @@ copy into `archive/`, and check off or remove the entry here.
 
 ## Queue
 
-(empty)
+- [ ] Correct the `stringReplaceAll` / `stringReplaceFirst` arg name in SKILL.md § String actions:
+  the table lists `match`, but the platform requires **`pattern`** (and `pattern` is a *regex*, not a
+  literal). `references/connect-builtin-actions.json` has it right — `[('string', False),
+  ('pattern', False), ('replacement', True), ('ignoreCase', True)]` — so only the SKILL.md prose table
+  is wrong. Also check `references/native-action-cheatsheet.md` for the same error. Worth adding a
+  general note that the SKILL.md summary tables are hand-written and the JSON catalog is the
+  authoritative source for arg names, so verify against it before using a builtin's args.
+  Context: authoring the header-recovery fallback in `BuildLogReviewSheet` (LogReview server).
+  Both xmllint and `_scripts/validate_xml.py` passed and `connect_fmt_validate` reported no error —
+  nothing catches a wrong builtin arg name locally. It only failed at *runtime*, as
+  `java.lang.IllegalArgumentException: Error compiling action set 'BuildLogReviewSheet':
+  Missing required property 'stringReplaceAll.pattern'`, costing a deploy + job-run cycle.
+  Consider also whether riadmin's `connect_validate` should gain a builtin-arg-name check, since it
+  already resolves the builtin registry for its `unknown_action` rule. (2026-08-13)
+
+- [ ] Add a § on Java-String vs JS-String coercion. Several file/IO builtins return a **Java String**
+  (`typeof` is `"object"`, not `"string"`), where `.length` resolves to the Java `length()` *method
+  object* rather than a number — so `name.length > 4` is silently `false` and any guard built on it
+  fails with no error. Confirmed for `getFileName`; `listFiles` by contrast returns a genuine JS array
+  of JS strings, and `lastIndexOf`/`toLowerCase`/`substring` all behave normally on the Java String —
+  it is specifically `.length` that breaks. The fix is to coerce once at the boundary:
+  `("" + getFileName(...))`. Worth auditing which other builtins return Java Strings
+  (`loadFileAsString` is another suspect) and stating the rule that any string crossing out of a
+  builtin should be coerced before arithmetic or `.length` use. Context: this silently disabled the
+  entire `pushCategoryTabs` CSV filter in `BuildLogReviewSheet` — 10 tabs, 0 created, 0 errors
+  logged, sub-second runtime, no clue in the log. It is the second time this class of bug has hit this
+  same action set. (2026-08-13)
 
 ## Processed
 
