@@ -95,7 +95,7 @@ Three rules about the indented form:
 | setVariable vs copyRecord — reference vs deep copy, array mutation rule | § setVariable vs copyRecord |
 | Naming (prefixes, camelCase, reserved labels) | § Naming Scheme |
 | **`label` quoting — bare on `section`/`forEach`/`while`/`continue`/`break`, quoted only on `caFnLog`** | § Section Labels |
-| `about` section content (verbose Purpose + pseudo-code, plain ASCII) | § about Section |
+| `about` section content (capped Purpose + pseudo-code, one-line change log, what NOT to include) | § about Section |
 | `defineDefaultVariables` content | § defineDefaultVariables Section |
 | Logging — built-in `log` action | § Logging |
 | Counting — variable-based counters | § Counting |
@@ -627,53 +627,85 @@ defineDefaultVariables  (suppressTrace="true")
 
 ## about Section
 
-Required first section. Contains `comment` actions only. The goal is that a reader who has never
-seen the action set can understand what it does and how to call it without reading the logic.
+Required first section. Contains `comment` actions only.
 
-Order:
+**The `about` section is a support aid, and every line in it costs a row in the Connect editor.**
+Write the fewest lines that let a supporter who has never seen the action set understand what it
+does and find the logic. Do not restate what the platform already stores. The caps below are hard
+limits, not targets — a two-line `Purpose` is better than a padded four-line one.
 
-1. `Last Modified By:` / `Last Modified Date:`
-2. `Purpose:` — **a high-level logical overview**, not a single sentence. State what the action set
-   does, its inputs and outputs, and the key branches/decisions. Indent continuation lines two
-   spaces.
-3. `Overview (pseudo-code):` — *optional but encouraged.* A short, plain-language sketch of the flow
-   so a caller can see the shape of the logic. Use indentation for nesting; describe loops and
-   conditions in words (e.g. `for each row:` / `if terminated: skip and continue`).
-4. `Parameters:` — one line per parameter, mark optionals `[optional]`.
-5. `Change Log` separator + dated entries.
+Order (only these blocks, only when they carry content):
 
-**Keep comment text plain ASCII.** Comments display in the Connect editor, which does not render
-extended punctuation reliably. Avoid em/en dashes (`—` `–`), smart/curly quotes, and ellipsis (`…`);
-use a hyphen-minus (`-`), straight quotes, and three periods. Regular dashes and arrows (`-->`,
-`<--`) are fine.
+1. `Purpose:` — **max 4 lines.** What the action set does, its inputs and outputs, and its key
+   branches. Indent continuation lines two spaces.
+2. `Overview (pseudo-code):` — *optional.* **Max 6 lines**, one flow step per line in execution
+   order. Use indentation for nesting; describe loops and conditions in words (e.g. `for each row:`
+   / `if terminated: skip and continue`). Omit it entirely for a short action set whose section
+   labels already tell the story.
+3. `Returns:` / `Globals required:` / `Safety:` / `Note:` — *optional*, only when they say something
+   not documented elsewhere. A `Returns:` contract on a `returnsValue="true"` function is worth the
+   lines; a `Note:` restating the code is not.
+4. `Change Log` separator + entries — **one `comment` action per entry, one line, max 140 chars**:
+   `YYYY-MM-DD (Name): One-line summary.` Keep what changed and the greppable identifiers
+   (attributes, action-set names, Global keys); leave the rationale out. Never continue an entry
+   onto a second line. **Max 3 entries, most-recent-first is not required but the list is capped —
+   before adding a new entry that would push the count past 3, drop the oldest one(s).** An
+   unbounded Change Log is exactly the kind of accumulated verbosity this section exists to avoid; a
+   live audit of a customer's Utilities project (2026-09) found action sets that had grown to 4 entries
+   / 16 comment lines purely from years of incremental adds, none of which a supporter reading the
+   file today needed. Archive the entries you drop per § Trimming an existing about section — never
+   let dropping a Change Log entry be the only place that history existed.
+
+### Never put these in the about section
+
+| Do not write | Why | Where it lives instead |
+|---|---|---|
+| `Last Modified By:` / `Last Modified Date:` | Hand-maintained and reliably wrong — a 2026 audit of one tenant found 62 of 75 dates disagreed with the file's own metadata | The root element's `modifiedMs` / `modifiedBy` / `modifiedByName`, maintained by the platform |
+| `Created By:` / `Creation Date:` | Same staleness problem, no consumer | Nowhere; drop it |
+| `Parameters:` block | Duplicates `argDefs` — the same audit found 89% of `argDefs` restated verbatim | The `argDef` `description` attribute, which the Connect UI already surfaces |
+| A sweep / reformat entry in the Change Log | Pure noise at scale — one line per action set across a whole project | The engagement's own notes or a sweep manifest |
+| A `Template Version:` (or any other) banner line before `Purpose:` | Legacy template scaffolding with no consumer — found still present ahead of `Purpose:` in at least one live action set during a 2026-09 a customer cleanup pass | Nowhere; drop it — the action set's own version/template lineage isn't tracked in prose |
+
+If a parameter needs documenting, **write the `argDef` `description`** — that is the parameter's
+documentation. A missing `description` is a standards violation (§ argDef Rules), not a reason to
+add a `Parameters` block.
+
+### Keep comment text plain ASCII
+
+Comments display in the Connect editor, which does not render extended punctuation reliably. Avoid
+em/en dashes (`—` `–`), smart/curly quotes, and ellipsis (`…`); use a hyphen-minus (`-`), straight
+quotes, and three periods. Regular dashes and arrows (`-->`, `<--`) are fine.
+
+Never wrap a `comment` value in literal quote characters — `value="&quot;Purpose:&quot;"` renders the
+quotes as part of the text. The `comment` arg takes bare prose, not a quoted JS string.
 
 ```xml
 <action name="section">
   <arg name="label" value="about"/>
   <arg name="suppressTrace" value="true"/>
   <arg name="do">
-    <action name="comment"><arg name="comment" value="Last Modified By: Name"/></action>
-    <action name="comment"><arg name="comment" value="Last Modified Date: YYYY-MM-DD HH:mm"/></action>
     <action name="comment"><arg name="comment" value="Purpose:"/></action>
-    <action name="comment"><arg name="comment" value="  Builds the staff import CSV consumed by IDHub from the staff database."/></action>
-    <action name="comment"><arg name="comment" value="  Reads staff rows, maps each to the IDHub field layout, writes one row per"/></action>
-    <action name="comment"><arg name="comment" value="  active employee, skips terminated records, and logs counts at the end."/></action>
+    <action name="comment"><arg name="comment" value="  Builds the staff import CSV consumed by IDHub from the staff database. Maps each"/></action>
+    <action name="comment"><arg name="comment" value="  staff row to the IDHub field layout, skips terminated records, and logs counts."/></action>
     <action name="comment"><arg name="comment" value="Overview (pseudo-code):"/></action>
-    <action name="comment"><arg name="comment" value="  open DB session"/></action>
-    <action name="comment"><arg name="comment" value="  rows = query staff table"/></action>
+    <action name="comment"><arg name="comment" value="  open DB session; rows = query staff table"/></action>
     <action name="comment"><arg name="comment" value="  for each row:"/></action>
-    <action name="comment"><arg name="comment" value="    if row is terminated: skip++ and continue"/></action>
-    <action name="comment"><arg name="comment" value="    map row to IDHub layout, append CSV row, add++"/></action>
-    <action name="comment"><arg name="comment" value="  write CSV to output path"/></action>
-    <action name="comment"><arg name="comment" value="  log counts"/></action>
-    <action name="comment"><arg name="comment" value="Parameters:"/></action>
-    <action name="comment"><arg name="comment" value="  logOnly [optional]: Suppress writes when true."/></action>
-    <action name="comment"><arg name="comment" value="  logLevel [optional]: quiet | normal | debug."/></action>
+    <action name="comment"><arg name="comment" value="    if terminated: skip++ and continue"/></action>
+    <action name="comment"><arg name="comment" value="    map to IDHub layout, append CSV row, add++"/></action>
+    <action name="comment"><arg name="comment" value="  write CSV to output path; log counts"/></action>
     <action name="comment"><arg name="comment" value="================== Change Log =================="/></action>
     <action name="comment"><arg name="comment" value="YYYY-MM-DD (Name): Initial version."/></action>
   </arg>
 </action>
 ```
+
+### Trimming an existing about section
+
+When editing an action set whose `about` section predates these rules, bring it into line as part of
+the edit: delete the `Last Modified` / `Created By` / `Parameters` blocks (backfilling any missing
+`argDef` `description` first), cap `Purpose` and `Overview`, and collapse each multi-line change-log
+entry to one line. Archive the removed history somewhere outside the action set before deleting it —
+never discard change-log detail that exists nowhere else.
 
 ---
 
@@ -1253,7 +1285,7 @@ Order parameters as follows, including **only** those that are actually present:
 5. `about` — always the final parameter
 
 The `about` parameter exists to surface documentation in the Connect UI. Populate its `description`
-with the same verbose Purpose + high-level overview described in § about Section — plain ASCII, no
+with the same capped Purpose + high-level overview described in § about Section — plain ASCII, no
 HTML. Keep it as a single attribute string (use ` | ` or `;` as separators).
 
 ### Sessions
@@ -1422,7 +1454,7 @@ Every parameter must have a `description` attribute. Types:
 ### Function action set
 
 ```xml
-<actionDef xmlns="urn:idauto.net:dss:actiondef" name="FnExampleFunction" returnsValue="true" description="Function - RI: One-sentence description."><argDefs><argDef name="session" type="object" optional="true" description="Existing directory session; opens one if omitted."/><argDef name="logOnly" type="boolean" optional="true" description="Suppress writes when true."/><argDef name="logLevel" type="enum:quiet,normal,debug" optional="true" description="Logging verbosity."/></argDefs><actions><action id="00000001-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="about"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000001-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Last Modified By: "/></action><action id="00000001-0000-0000-0000-000000000003" name="comment" outputVar="" disabled="false"><arg name="comment" value="Last Modified Date: YYYY-MM-DD"/></action><action id="00000001-0000-0000-0000-000000000004" name="comment" outputVar="" disabled="false"><arg name="comment" value="Purpose:"/></action><action id="00000001-0000-0000-0000-00000000000A" name="comment" outputVar="" disabled="false"><arg name="comment" value="  One-paragraph logical overview: what it does, inputs, outputs, key branches."/></action><action id="00000001-0000-0000-0000-00000000000B" name="comment" outputVar="" disabled="false"><arg name="comment" value="Overview (pseudo-code):"/></action><action id="00000001-0000-0000-0000-00000000000C" name="comment" outputVar="" disabled="false"><arg name="comment" value="  describe the flow in plain words, indented for nesting"/></action><action id="00000001-0000-0000-0000-000000000005" name="comment" outputVar="" disabled="false"><arg name="comment" value="Parameters:"/></action><action id="00000001-0000-0000-0000-000000000006" name="comment" outputVar="" disabled="false"><arg name="comment" value="  session [optional]: Existing directory session."/></action><action id="00000001-0000-0000-0000-000000000007" name="comment" outputVar="" disabled="false"><arg name="comment" value="  logOnly [optional]: Suppress writes when true."/></action><action id="00000001-0000-0000-0000-000000000008" name="comment" outputVar="" disabled="false"><arg name="comment" value="  logLevel [optional]: quiet | normal | debug."/></action><action id="00000001-0000-0000-0000-000000000009" name="comment" outputVar="" disabled="false"><arg name="comment" value="================== Change Log =================="/></action><action id="00000001-0000-0000-0000-000000000010" name="comment" outputVar="" disabled="false"><arg name="comment" value="YYYY-MM-DD (Name): Initial version."/></action></arg></action><action id="00000002-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="defineDefaultVariables"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000002-0000-0000-0000-000000000002" name="setVariable" outputVar="" disabled="false"><arg name="name" value="process"/><arg name="value" value="{actionSetName:getCurrentActionSetName(),processID:getProcessID(),processJobName:getProcessJobName()||getProcessTopLevelActionSetName(),processLogFile:getProcessLogFile(),processProject:getProcessProject() == &quot;&quot; ? &quot;Main&quot; : getProcessProject(),processStartTime:formatDate(getProcessStartTime(),&quot;yyyy-MM-dd HH:mm:ss&quot;,Global.localTimeZone),runningIDHub:runningIDHub()}"/></action><action id="00000002-0000-0000-0000-000000000003" name="setVariable" outputVar="" disabled="false"><arg name="name" value="logLevel"/><arg name="value" value="logLevel || &quot;quiet&quot;"/></action><action id="00000002-0000-0000-0000-000000000004" name="setVariable" outputVar="" disabled="false"><arg name="name" value="logColors"/><arg name="value" value="Object.assign({changedData:&quot;chocolate&quot;,complete:&quot;teal&quot;,counts:&quot;black&quot;,data:&quot;blue&quot;,debug:&quot;purple&quot;,error:&quot;red&quot;,fail:&quot;darkred&quot;,info:&quot;royalBlue&quot;,logOnly:&quot;slateGray&quot;,processing:&quot;steelBlue&quot;,query:&quot;darkcyan&quot;,skipped:&quot;mediumpurple&quot;,sourceData:&quot;dimGray&quot;,success:&quot;green&quot;,targetData:&quot;darkslategray&quot;,test:&quot;darkorange&quot;,warn:&quot;goldenrod&quot;,whitespace:&quot;white&quot;},Global.connectLogColorSchema||{})"/></action><action id="00000002-0000-0000-0000-000000000005" name="setVariable" outputVar="" disabled="false"><arg name="name" value="counts"/><arg name="value" value="{processed:0,add:0,update:0,skip:0,error:0}"/></action></arg></action><action id="00000003-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="establishConnections"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000003-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Function mode: use provided session or open one."/></action></arg></action><action id="00000004-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="mainLogic"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000004-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Core logic here."/></action></arg></action><action id="00000005-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="closeConnections"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000005-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Close only if we opened (check closeSession flag)."/></action></arg></action><action id="00000006-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="outputCounts"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000006-0000-0000-0000-000000000002" name="log" outputVar="" disabled="false"><arg name="message" value="&quot;Counts -- processed: &quot; + counts.processed + &quot; | add: &quot; + counts.add + &quot; | update: &quot; + counts.update + &quot; | skip: &quot; + counts.skip + &quot; | error: &quot; + counts.error"/><arg name="level" value="&quot;INFO&quot;"/></action></arg></action></actions></actionDef>
+<actionDef xmlns="urn:idauto.net:dss:actiondef" name="FnExampleFunction" returnsValue="true" description="Function - RI: One-sentence description."><argDefs><argDef name="session" type="object" optional="true" description="Existing directory session; opens one if omitted."/><argDef name="logOnly" type="boolean" optional="true" description="Suppress writes when true."/><argDef name="logLevel" type="enum:quiet,normal,debug" optional="true" description="Logging verbosity."/></argDefs><actions><action id="00000001-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="about"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000001-0000-0000-0000-000000000004" name="comment" outputVar="" disabled="false"><arg name="comment" value="Purpose:"/></action><action id="00000001-0000-0000-0000-00000000000A" name="comment" outputVar="" disabled="false"><arg name="comment" value="  What it does, its inputs and outputs, and its key branches. Max 4 lines."/></action><action id="00000001-0000-0000-0000-00000000000B" name="comment" outputVar="" disabled="false"><arg name="comment" value="Overview (pseudo-code):"/></action><action id="00000001-0000-0000-0000-00000000000C" name="comment" outputVar="" disabled="false"><arg name="comment" value="  one flow step per line, in execution order, indented for nesting. Max 6 lines."/></action><action id="00000001-0000-0000-0000-000000000009" name="comment" outputVar="" disabled="false"><arg name="comment" value="================== Change Log =================="/></action><action id="00000001-0000-0000-0000-000000000010" name="comment" outputVar="" disabled="false"><arg name="comment" value="YYYY-MM-DD (Name): Initial version."/></action></arg></action><action id="00000002-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="defineDefaultVariables"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000002-0000-0000-0000-000000000002" name="setVariable" outputVar="" disabled="false"><arg name="name" value="process"/><arg name="value" value="{actionSetName:getCurrentActionSetName(),processID:getProcessID(),processJobName:getProcessJobName()||getProcessTopLevelActionSetName(),processLogFile:getProcessLogFile(),processProject:getProcessProject() == &quot;&quot; ? &quot;Main&quot; : getProcessProject(),processStartTime:formatDate(getProcessStartTime(),&quot;yyyy-MM-dd HH:mm:ss&quot;,Global.localTimeZone),runningIDHub:runningIDHub()}"/></action><action id="00000002-0000-0000-0000-000000000003" name="setVariable" outputVar="" disabled="false"><arg name="name" value="logLevel"/><arg name="value" value="logLevel || &quot;quiet&quot;"/></action><action id="00000002-0000-0000-0000-000000000004" name="setVariable" outputVar="" disabled="false"><arg name="name" value="logColors"/><arg name="value" value="Object.assign({changedData:&quot;chocolate&quot;,complete:&quot;teal&quot;,counts:&quot;black&quot;,data:&quot;blue&quot;,debug:&quot;purple&quot;,error:&quot;red&quot;,fail:&quot;darkred&quot;,info:&quot;royalBlue&quot;,logOnly:&quot;slateGray&quot;,processing:&quot;steelBlue&quot;,query:&quot;darkcyan&quot;,skipped:&quot;mediumpurple&quot;,sourceData:&quot;dimGray&quot;,success:&quot;green&quot;,targetData:&quot;darkslategray&quot;,test:&quot;darkorange&quot;,warn:&quot;goldenrod&quot;,whitespace:&quot;white&quot;},Global.connectLogColorSchema||{})"/></action><action id="00000002-0000-0000-0000-000000000005" name="setVariable" outputVar="" disabled="false"><arg name="name" value="counts"/><arg name="value" value="{processed:0,add:0,update:0,skip:0,error:0}"/></action></arg></action><action id="00000003-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="establishConnections"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000003-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Function mode: use provided session or open one."/></action></arg></action><action id="00000004-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="mainLogic"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000004-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Core logic here."/></action></arg></action><action id="00000005-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="closeConnections"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000005-0000-0000-0000-000000000002" name="comment" outputVar="" disabled="false"><arg name="comment" value="Close only if we opened (check closeSession flag)."/></action></arg></action><action id="00000006-0000-0000-0000-000000000001" name="section" outputVar="" disabled="false"><arg name="label" value="outputCounts"/><arg name="suppressTrace" value="true"/><arg name="do"><action id="00000006-0000-0000-0000-000000000002" name="log" outputVar="" disabled="false"><arg name="message" value="&quot;Counts -- processed: &quot; + counts.processed + &quot; | add: &quot; + counts.add + &quot; | update: &quot; + counts.update + &quot; | skip: &quot; + counts.skip + &quot; | error: &quot; + counts.error"/><arg name="level" value="&quot;INFO&quot;"/></action></arg></action></actions></actionDef>
 ```
 
 ### Scheduled Job (Manage/Sync)
@@ -1448,7 +1480,9 @@ Before delivering any XML:
     (`xmllint`) catches this, but check explicitly — bare `&&` is the most common ill-formedness bug
 10. **Tag balance** — count `<arg name="do">`, `<arg name="then">`, `<arg name="else">` opens
     vs `</arg>` closes; they must match
-11. **All `argDef` elements** have a `description` attribute
+11. **All `argDef` elements** have a `description` attribute — this is the parameter's only
+    documentation now that the `about` section carries no `Parameters` block, so an empty or
+    near-empty `description` leaves the parameter undocumented everywhere
 12. **`logAuditEvent` called** after every write to an external system (`targetID` = idautoID, `extendedProperties` = the record)
 13. **Structured data is serialised with `toJSON(obj)`** (not `JSON.stringify`); bare `{...}` /
     `[...]` literals still fail the compiler in a `setVariable value=` - seed with the
@@ -1474,6 +1508,9 @@ Before delivering any XML:
     `setRecordFieldValue`. Check too that any Record whose values are compared strictly or used in
     arithmetic was **not** built with `createRecordFromObject`, which stringifies every value.
     See § Records & arrays - construction
+20. **`about` section is within limits** — no `Last Modified` / `Created By` / `Parameters` block,
+    `Purpose` <= 4 lines, `Overview` <= 6 lines, every change-log entry on ONE line <= 140 chars, and
+    no `comment` value wrapped in literal quote characters. See § about Section
 
 ---
 
@@ -1505,6 +1542,11 @@ Before delivering any XML:
 | Nesting arg (`do`/`then`/`else`) has a `"value"` field | Remove `value` from nesting args — its presence causes `Property must be a list of actions`; correct form: `{"name":"do","actions":[...]}` |
 | HTML or markdown in a `log` message | The log viewer is plain text — tags appear literally; use `\n`, `\t`, and the `color` arg for layout |
 | Em dash / smart quotes in a comment, description, or section label | Use plain ASCII — the Connect editor does not render extended punctuation (log messages are fine) |
+| `Last Modified By:` / `Last Modified Date:` in the `about` section | Delete them — hand-maintained and reliably stale (62 of 75 wrong in one tenant audit). The platform tracks `modifiedMs`/`modifiedBy`/`modifiedByName` on the root element |
+| `Parameters:` block in the `about` section | Delete it — it duplicates `argDefs` (89% verbatim in one audit). Document the parameter in its `argDef` `description`, which the Connect UI surfaces |
+| A change-log entry spilling onto two-space continuation lines | Each entry is ONE `comment` action, one line, <= 140 chars — the editor renders every line as its own row, so a 6-line entry looks like 6 entries. Put the rationale outside the action set |
+| A "Sweep -" / "reformatted" change-log entry | Don't log cleanup in the action set — at scale it is one noise line per set. Record the sweep once in the engagement's notes |
+| `comment` value wrapped in quotes: `value="&quot;Purpose:&quot;"` | The `comment` arg takes bare prose — the quotes render as literal text. Same bug appears on the Change Log separator |
 | Single backslash for a literal `\` | Double it — a literal backslash is `\\`; a single `\` escapes the next character |
 | `recordChanges.length` on a change iterator result | Always `undefined` — the result is a Connect iterator, not an array; count by incrementing a variable inside `forEach` — see § Change Iterators |
 | Sibling actions after a mid-block nested `if` (MCP save) | They get hoisted onto the parent `if` and break compile (`Can't redefine property 'if.<action>'`) — make the nested `if` the last element, or flatten to ternary `setVariable`s |
