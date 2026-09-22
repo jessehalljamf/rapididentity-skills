@@ -116,6 +116,7 @@ Three rules about the indented form:
 | HTTP actions — REST API patterns | § HTTP Actions |
 | `delay` action — timed pauses | § delay Action |
 | Change iterators (AD/OpenLDAP) — no `.length`, count in `forEach` | § Change Iterators |
+| **Reading a CSV/TSV file — `openDelimitedTextInput`, never hand-split with `loadFileAsString`** | § Reading CSV/Delimited Files |
 | LDAP polling loop pattern | § LDAP Polling Loop Pattern |
 | RI Sponsorship API | `references/ri-sponsorship-api.md` |
 | `startPortalWorkflow` — submit a WFM request programmatically from Connect | `references/ri-start-portal-workflow.md` |
@@ -1561,6 +1562,7 @@ Before delivering any XML:
 | Treating `getIdautoIDForUser`/`getIdautoIDForGroup` as read-only lookups | They **create the idautoID if missing** — calling one on the wrong DN mints a new immutable ID; not safe as an existence probe |
 | `copyArray` as a snapshot of an array of Records | `copyArray` is **shallow** — the Records inside are still shared; mutating them mutates the "snapshot". `copyRecord` each element |
 | Concatenating raw values into an LDAP filter | Use `stringEscape` with `escapeType="ldap-filter"` (or `ldap-dn` for DN parts) — unescaped `( ) * \` in user data breaks or injects into the filter |
+| Parsing a CSV/TSV with `loadFileAsString` + `splitString` | Breaks on quoted fields containing the delimiter, embedded newlines, or escaped quotes — use `openDelimitedTextInput` and iterate with `forEach`; see § Reading CSV/Delimited Files |
 
 ---
 
@@ -1708,6 +1710,66 @@ it inside the `forEach`:
 - Never test or branch on `recordChanges.length` — it is always `undefined` for a change iterator
 - Initialize the counter (e.g. `total = 0`) before the loop; increment inside the `forEach do`
 - The records only become accessible one at a time inside the loop body via the loop `variable`
+
+---
+
+## Reading CSV/Delimited Files — `openDelimitedTextInput`
+
+**Never** hand-parse a CSV/TSV with `loadFileAsString` + `splitString` — it breaks the moment a
+field is quoted and contains the delimiter, an embedded newline, or an escaped quote. Use the
+built-in `openDelimitedTextInput` action instead. It returns a Connect-managed record stream —
+iterate it with `forEach` exactly like the LDAP change iterators above (no `.length`), and `close`
+it when done. Verified against a live production action set (`FnLoadRecords`, customer).
+
+```xml
+<action name="isFile" outputVar="fileExists"><arg name="path" value="filePath"/></action>
+<action name="if">
+  <arg name="condition" value="!fileExists"/>
+  <arg name="then">
+    <action name="log"><arg name="message" value="&quot;CSV file not found: &quot; + filePath"/><arg name="level" value="&quot;ERROR&quot;"/></action>
+    <action name="return"/>
+  </arg>
+  <arg name="else"/>
+</action>
+<action name="openDelimitedTextInput" outputVar="fileRecords">
+  <arg name="fileName" value="filePath"/>
+  <arg name="firstRecordHandling" value="&quot;Field Names&quot;"/>
+  <arg name="fieldSeparator" value="&quot;\t&quot;"/>
+  <arg name="charSet" value="&quot;UTF-8&quot;"/>
+</action>
+<action name="if">
+  <arg name="condition" value="!fileRecords"/>
+  <arg name="then">
+    <action name="log"><arg name="message" value="&quot;Could not open CSV: &quot; + filePath"/><arg name="level" value="&quot;ERROR&quot;"/></action>
+    <action name="return"/>
+  </arg>
+  <arg name="else"/>
+</action>
+<action name="forEach">
+  <arg name="label" value="csvRowLoop"/>
+  <arg name="variable" value="row"/>
+  <arg name="collection" value="fileRecords"/>
+  <arg name="do">
+    <!-- row.<fieldName> is already a Record field - e.g. row.cn, row.idautoGroupIncludeFilter -->
+  </arg>
+</action>
+<action name="close"><arg name="closeable" value="fileRecords"/></action>
+```
+
+**Rules:**
+- `firstRecordHandling`: `&quot;Field Names&quot;` reads the file's own header row and names each
+  Record's fields after it (use whenever the header already has the names you want — no separate
+  `fieldNames` arg needed). `&quot;Normal&quot;` treats the first row as data — pass `fieldNames`
+  explicitly as a comma-separated string. `&quot;Skip&quot;` discards the first row without using it
+  — also pass `fieldNames` explicitly.
+- `fieldSeparator` defaults to `,` — set it explicitly (`&quot;\t&quot;`) for TSV.
+- `charSet` defaults to **ISO-8859-1**, same trap as `loadFileAsString` (see Common Pitfalls) — pass
+  `&quot;UTF-8&quot;` explicitly for UTF-8 files.
+- Each `row` in the `forEach` is already a native Record with quoting/escaping handled — read fields
+  with dot notation (`row.cn`), never `splitString`/`.trim()` on the raw line.
+- Always `close(closeable=fileRecords)` when done, same as any other closeable I/O handle.
+- `openTextInput` is the unstructured sibling (no field parsing) for plain-text, non-tabular files —
+  not for CSV/TSV.
 
 ---
 
