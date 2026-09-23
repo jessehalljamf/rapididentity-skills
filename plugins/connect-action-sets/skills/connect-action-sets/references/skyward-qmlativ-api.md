@@ -19,7 +19,7 @@ Returns the OAuth response data object (contains `access_token`) on success, `fa
 | `url` | string | Yes | Skyward base URL (from `Global.skywardBaseURL`) |
 | `integrationType` | enum: `default`, `Washington` | No | State-specific token variant |
 
-**⚠️ Known issue in captured version:** An unconditional `setVariable` always overrides to the default integration token (making the Washington variant dead code), and an early `return` fires before the `httpPOST`. Verify the production version in your Connect environment has these removed.
+**⚠️ Common implementation pitfall:** An unconditional `setVariable` can silently override to the default integration token (making the Washington variant dead code), and an early `return` can fire before the `httpPOST`. Verify your Connect implementation doesn't have these bugs.
 
 ---
 

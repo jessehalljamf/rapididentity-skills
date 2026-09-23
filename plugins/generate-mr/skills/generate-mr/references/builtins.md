@@ -7,6 +7,8 @@
 givenName.lowercase()              // "Alex" → "alex"
 givenName.uppercase()              // "Alex" → "ALEX"
 givenName.titleCase()              // "alex johnson" → "Alex Johnson"
+                                    // hyphenated segments are title-cased individually:
+                                    // "smith-jones" → "Smith-Jones"
 ```
 
 ### Extraction
@@ -79,6 +81,15 @@ grade.calculateGradYear(8)         // school year rolls over in August
 (givenName.take(1).lowercase() + sn.lowercase()).incrementOnCollision(20, 1)
 // maxBaseLength=20, start collision suffix at 1 (produces jsmith, jsmith1, jsmith2...)
 ```
+
+### Similarity / Rounding (rarely needed directly)
+```
+field.similarity("otherValue")            // normalized Levenshtein similarity, 0.0-1.0, 2-decimal default
+field.similarity("otherValue", 4)         // 4-decimal precision
+field.round(2)                            // round a numeric-string result to N decimals
+```
+These back the engine's fuzzy `key fuzzy` match scoring (see Match Rules in SKILL.md) — you
+almost never need to call them directly in a customer `.mr` file.
 
 ---
 

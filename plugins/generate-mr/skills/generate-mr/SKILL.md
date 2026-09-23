@@ -123,6 +123,8 @@ let @activationOffset = -1
 | `convertDateTimeTo` | `field.convertDateTimeTo("pattern")` | RI datetime → output format |
 | `convertDateTime` | `field.convertDateTime("inPat", "outPat")` | One-step datetime conversion |
 | `incrementOnCollision` | `field.incrementOnCollision([maxLen[, startIdx]])` | Collision-safe usernames (policy only) |
+| `similarity` | `field.similarity("other"[, precision])` | Normalized Levenshtein similarity (0.0–1.0). Rarely needed directly — fuzzy match rules (below) use this internally. |
+| `round` | `field.round(decimals)` | Rounds a numeric string result (e.g. chained off `similarity`) to N decimal places. |
 
 ---
 
@@ -199,7 +201,29 @@ These are used in **application** (policy) rules and control PVP's behavior:
 | `@managerIdentifierAttribute` | string | ID Store attribute to use for manager linkage |
 | `@defaultManagerID` | string | Fallback manager ID when none is resolved |
 | `@passwordPolicy` | object | Packed password + sync policy |
-| `@username` | string (read-only) | The candidate username (readable in policy expressions) |
+| `@passwordSyncPolicy` | string | `ALWAYS` \| `CHANGES_ONLY` \| `NEVER`. Only ever set **nested inside** the packed `@passwordPolicy` object below — never as a standalone top-level `let`. |
+| `@publishPasswordOnUpdate` | boolean | Controls whether a password is republished to sinks on an update (not just an add). Note: Google Workspace has no NOP guard on password writes — every run where this resolves `TRUE` costs an API call regardless of whether the password actually changed. |
+| `@usernameOrder` | list (policy rule) | Ordered list of candidate values IDHub tries, in order, when resolving/validating the primary username. See example below. |
+| `@username` | string (interpolation token) | **Not a `let` target.** A literal token you embed inside another attribute's *string expression* in a policy rule — IDHub substitutes it with the resolved username at generation time. Used to derive dependent values (mail, extension attributes) from the username without re-deriving it. See example below. |
+
+### `@usernameOrder` — candidate username fallback list
+```
+let @usernameOrder = [idautoPersonUserNameMV, mail, idautoPersonStuID]
+```
+IDHub tries each field in order and uses the first that resolves to a usable value.
+
+### `@username` — username interpolation token
+Use the literal string `"@username"` inside a concatenation to build attributes derived from
+the resolved username, without duplicating the username-generation expression:
+```
+// Email derived from the resolved username, not from a separate expression
+let mail = "@username" + "@district.edu"
+
+// Extension attribute built from the resolved username
+let idautoPersonExt17 = "edu/idauto/" + "@username"
+```
+This only works in **policy rules**, on the same pass that generates
+`idautoPersonUserNameMV` — it is not a generic pseudo-attribute you set with `let @username = ...`.
 
 ### `incrementOnCollision`
 Collision-safe username generation (policy rules only):
@@ -250,7 +274,7 @@ let key fuzzy sn = last_name
 5. **Use `when` for 3+ branches, `if` for 2 branches** — never nest `if/else` chains.
 6. **Use `isListEmpty`/`isListNotEmpty` instead of `if (field)` for list fields** — the null guard in `if` won't catch an empty list.
 7. **`else -> -1` is the canonical "disabled" sentinel** for numeric offset pseudo-attributes.
-8. **Use `stripDiacriticals().lowercase()` before using a name in a username** — prevents provisioning failures for accented names.
+8. **Use `stripDiacriticals().lowercase()` before using a name in a username** — prevents provisioning failures for accented names. Note: as of IDHub 2026.04.0, generated usernames have `.stripSpaces().stripDiacriticals()` applied automatically at generation time, so these calls are no longer strictly *required* in a username-policy expression — but keep writing them explicitly anyway for readability and for any other attribute (e.g. `mail`) that reuses the same name fields outside the username-generation path, where the auto-strip does not apply.
 
 ### Choosing Built-ins
 
@@ -268,6 +292,7 @@ let key fuzzy sn = last_name
 - `contains` on a string field doesn't match — it only works on list fields; for strings use `containsText`.
 - In `when`, always put the most-specific condition first (disabled-account checks before type-based checks, etc.).
 - The `else` in a `when` is optional — omitting it means unmatched records produce null (attribute left unset).
+- A pseudo-attribute name is **not validated by the grammar** — `let @activationOfset = ...` (misspelled) parses successfully and silently produces a dead no-op attribute. Double-check pseudo-attribute spelling against the table above; there is no compiler diagnostic for a typo'd `@name`.
 
 ---
 
@@ -346,6 +371,26 @@ let key exact b idautoPersonHRID = identifier
 ```
 
 ---
+
+## Validating Generated MR Against the Real Compiler
+
+If a local checkout of `idhub-provisioning` (the PVP repo) is available, don't just eyeball
+generated MR for correctness — compile it. The `mrt` CLI tool parses an `.mr` file through the
+real ANTLR grammar and prints the generated Kotlin, catching grammar errors and letting you
+verify a built-in resolves the way you expect (e.g. whether a `when` branch targeting a
+multi-valued attribute needs a list literal or a plain scalar — it doesn't, confirmed
+2026-09-17, see `references/patterns.md`'s "Preserve Existing Multi-Valued Attribute" pattern):
+
+```bash
+./gradlew :provisioning-tools:run --args="mrt -t <type> -c <ClassName> -f <file.mr>"
+```
+
+`<type>` is one of: `ingest`, `source-match`, `policy`, `publish`, `sink-match-disjunction`.
+`<file.mr>` needs a real header (`ruleID = <uuid>` / `ruleType = person`) — a bare fragment of
+`let` statements won't compile standalone. `BUILD SUCCESSFUL` with generated Kotlin printed to
+stdout means the grammar and built-ins resolved as written; a grammar error surfaces immediately
+instead of failing silently at runtime. Trim large lookup tables to a representative few branches
+when compile-checking — the grammar validates the same way regardless of table size.
 
 ## Reference Files
 

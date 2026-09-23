@@ -201,6 +201,30 @@ let @activationOffset = when {
 
 ---
 
+## Username Order & Interpolation Patterns
+
+### Candidate Username Fallback List
+```
+// Try the primary generated username first, then mail, then student ID.
+let @usernameOrder = [idautoPersonUserNameMV, mail, idautoPersonStuID]
+```
+
+### Deriving Mail and Extension Attributes from the Resolved Username
+```
+ruleID = a1b2c3d4-0000-0000-0000-000000000107
+ruleType = person
+
+// Policy: generate username, then derive mail and an extension attribute from it.
+// "@username" here is a literal interpolation token substituted with the resolved
+// username — it is NOT the pseudo-attribute `let @username = ...` (that form does not exist).
+
+let idautoPersonUserNameMV = (givenName.take(1).lowercase() + sn.take(1).lowercase()).incrementOnCollision(24, 1)
+let mail = ("@username" + "@idauto.edu")
+let idautoPersonExt17 = ("edu/idauto/" + "@username")
+```
+
+---
+
 ## Rename Policy Patterns
 
 ### Disable Renames Globally
@@ -255,12 +279,12 @@ let @ou = when {
     (idautoDisabled == "TRUE" && employeeType.contains("staff")) -> "OU=StaffDisabledAccounts,DC=meta,DC=local"
     (idautoDisabled == "TRUE")                                   -> "OU=StudentDisabledAccounts,DC=meta,DC=local"
     // Staff by school
-    (employeeType.contains("staff") && idautoPersonSchoolNames.contains("Example High School")) -> "OU=Staff,OU=BHS,DC=meta,DC=local"
-    (employeeType.contains("staff") && idautoPersonSchoolNames.contains("Example Middle School")) -> "OU=Staff,OU=BMS,DC=meta,DC=local"
+    (employeeType.contains("staff") && idautoPersonSchoolNames.contains("Example High School")) -> "OU=Staff,OU=EHS,DC=meta,DC=local"
+    (employeeType.contains("staff") && idautoPersonSchoolNames.contains("Example Middle School")) -> "OU=Staff,OU=EMS,DC=meta,DC=local"
     // Students by school + graduation year
-    ((employeeType.contains("student") && idautoPersonSchoolNames.contains("Example High School")) && (idautoPersonDeptDescr == "Class of 2026")) -> "OU=Class of 2026,OU=Students,OU=BHS,DC=meta,DC=local"
-    (employeeType.contains("student") && idautoPersonSchoolNames.contains("Example High School")) -> "OU=Students,OU=BHS,DC=meta,DC=local"
-    (employeeType.contains("student") && idautoPersonSchoolNames.contains("Example Middle School")) -> "OU=Students,OU=BMS,DC=meta,DC=local"
+    ((employeeType.contains("student") && idautoPersonSchoolNames.contains("Example High School")) && (idautoPersonDeptDescr == "Class of 2026")) -> "OU=Class of 2026,OU=Students,OU=EHS,DC=meta,DC=local"
+    (employeeType.contains("student") && idautoPersonSchoolNames.contains("Example High School")) -> "OU=Students,OU=EHS,DC=meta,DC=local"
+    (employeeType.contains("student") && idautoPersonSchoolNames.contains("Example Middle School")) -> "OU=Students,OU=EMS,DC=meta,DC=local"
     // Fallbacks
     employeeType.contains("student") -> "OU=Outplaced,DC=meta,DC=local"
     else                             -> "OU=RapidIDDefaultUser,DC=meta,DC=local"
@@ -389,7 +413,8 @@ let key exact k_fallback sAMAccountName = idautoPersonUserNameMV
 ### Packed Password Policy
 ```
 // Specify password, pwdReset, and sync policy in one pseudo-attribute.
-// The @passwordSyncPolicy controls when IDHub writes passwords:
+// @passwordSyncPolicy only ever appears nested here — there is no standalone
+// `let @passwordSyncPolicy = ...`. It controls when IDHub writes passwords:
 //   ALWAYS | CHANGES_ONLY | NEVER
 let @passwordPolicy = {
     "userPassword": givenName.lowercase().take(1) + sn.uppercase() + "1",
@@ -416,6 +441,36 @@ let idautoPersonUserNameMV = mail.getWord(0, "@")
 // Only populate the school code list if the person is a student.
 let idautoPersonSchoolCodes = if (roles.contains("student")) school_ids
 ```
+
+### Preserve Existing Multi-Valued Attribute When No Lookup Branch Matches
+```
+// A when-expression targeting a multi-valued attribute can return a plain scalar
+// literal per branch — no list-literal wrapping (-> ["Example ES"]) is needed.
+// Confirmed via the idhub-provisioning `mrt` compiler (2026-09-17): each matched
+// branch compiles to a plain entry.setAttribute(dstAttrKey, "<scalar>") call.
+//
+// To avoid clobbering an already-populated multi-valued field when the lookup key
+// doesn't match any entry, add a self-referential fallback branch (reads the
+// target attribute's OWN current/incoming value) before `else -> null`:
+let idautoPersonLocNames = when {
+    idautoPersonLocCode == "0100" -> "Example ES"
+    idautoPersonLocCode == "0101" -> "Sample ES"
+    // ...additional lookup branches...
+    idautoPersonLocNames.isListNotEmpty() -> idautoPersonLocNames[0]
+    else -> null
+}
+```
+This is NOT circular — MR expressions read the incoming record's current value for a
+field, even when that field is also the assignment target. `mrt` compiles the
+self-referential branch to a null-safe read of the source JSON, e.g.:
+```kotlin
+((idautoPersonLocNames != null) && (idautoPersonLocNames.isListNotEmpty())) -> {
+        entry.setAttrByVal(dstAttrKey, "idautoPersonLocNames", jsonObj, 0)
+}
+```
+Use this whenever a lookup-table `when` is replacing/augmenting a previously-direct
+mapping on a multi-valued attribute, so unmatched records fall back to their existing
+value instead of being nulled out.
 
 ### Null Suppression
 ```

@@ -564,7 +564,7 @@ iterated breaks the loop.
 
 Rules:
 - No underscores except `_*` names (the `DL` prefix uses no underscore)
-- CamelCase throughout: `SyncUsersToTarget`, `ManageGroupMembership`, `FnGetUserRecord`, `BuildStaffCSV`
+- CamelCase throughout: `SyncUsersToTarget`, `ManageGroupMembership`, `FnGetUserRecordRecord`, `BuildStaffCSV`
 
 **`Build` vs. `Sync` vs. `Report`:** Use `Build` when the action set's *only* output is a CSV file
 that another system ingests, and it is not a human-facing report. IDHub import files are always
@@ -665,7 +665,7 @@ Order (only these blocks, only when they carry content):
 | `Created By:` / `Creation Date:` | Same staleness problem, no consumer | Nowhere; drop it |
 | `Parameters:` block | Duplicates `argDefs` — the same audit found 89% of `argDefs` restated verbatim | The `argDef` `description` attribute, which the Connect UI already surfaces |
 | A sweep / reformat entry in the Change Log | Pure noise at scale — one line per action set across a whole project | The engagement's own notes or a sweep manifest |
-| A `Template Version:` (or any other) banner line before `Purpose:` | Legacy template scaffolding with no consumer — found still present ahead of `Purpose:` in at least one live action set during a 2026-09 a customer cleanup pass | Nowhere; drop it — the action set's own version/template lineage isn't tracked in prose |
+| A `Template Version:` (or any other) banner line before `Purpose:` | Legacy template scaffolding with no consumer — found still present ahead of `Purpose:` in at least one live action set during a 2026-09 customer cleanup pass | Nowhere; drop it — the action set's own version/template lineage isn't tracked in prose |
 
 If a parameter needs documenting, **write the `argDef` `description`** — that is the parameter's
 documentation. A missing `description` is a standards violation (§ argDef Rules), not a reason to
@@ -984,9 +984,8 @@ name. Use this when an inner condition should skip to the next iteration of a sp
 ## JavaScript & Engine Idioms
 
 The Connect expression engine is at least partially ES6-capable. The following are confirmed working
-and are the established idioms used in the ConnectLibrary examples — arrow functions and `new Set()`
-are live-verified in deployed production action sets (`FnSyncGroupToTarget`, `SyncGroups`,
-`FnSaveRecord`, `BuildUsersCSV`).
+and are the established idioms used in the shared-library examples — arrow functions and `new Set()`
+have been confirmed working via live testing against production action sets.
 
 > **Unverified ES6+ — do not use without a live test:** template literals (backticks), `const`/`let`,
 > destructuring, optional chaining (`?.`), nullish coalescing (`??`), spread/rest (`...`),
@@ -1245,9 +1244,9 @@ always-include rule), the rules in this section override them for Community Adap
 ### What Community Adapters are
 
 A Community Adapter is a portable, self-contained Connect project that wraps an external
-system's API — or a set of core utilities — in typed action sets (e.g. `caExampleSystem` for Microsoft
-Entra/Graph, `caExampleSystem` for the IDHub External REST API, `caCoreUtils` for the core `Fn*`
-utility library). They are designed to be imported and called by any project without depending
+system's API — or a set of core utilities — in typed action sets (e.g. `caExampleSystem` for a
+third-party REST API, `caCoreUtils` for a core `Fn*` utility library). They are designed to be
+imported and called by any project without depending
 on another project's internals.
 
 ### Naming convention
@@ -1257,7 +1256,7 @@ on another project's internals.
 | Token | Meaning | Examples |
 |---|---|---|
 | `ca` | Community Adapter (literal prefix) | — |
-| `{adapter}` | abbreviation / short name | `Entra`, `Fn`, `IDHub` |
+| `{adapter}` | abbreviation / short name | `ExampleSystem`, `CoreUtils` |
 | `{category}` | functional or system category of the action set | `AD`, `Group`, `User` |
 | `{function}` | the function the action set serves | `IsAccountDisabled` |
 
@@ -1719,7 +1718,7 @@ it inside the `forEach`:
 field is quoted and contains the delimiter, an embedded newline, or an escaped quote. Use the
 built-in `openDelimitedTextInput` action instead. It returns a Connect-managed record stream —
 iterate it with `forEach` exactly like the LDAP change iterators above (no `.length`), and `close`
-it when done. Verified against a live production action set (`FnLoadRecords`, customer).
+it when done. Confirmed via live testing against a production action set.
 
 ```xml
 <action name="isFile" outputVar="fileExists"><arg name="path" value="filePath"/></action>

@@ -81,7 +81,7 @@ for line in open("pvp.log", encoding="utf-8", errors="replace"):
 
 ## Known failure signature: broken username policy → `@username` literal leaks into mods
 
-Seen in a customer `pvp.log` run where 13,785 of 14,481 staff updates failed:
+Seen in a customer `pvp.log` run where roughly 95% of staff updates failed:
 
 - LDAP error: `resultCode=65 (object class violation) ... object class 'idautoPerson'
   requires attribute 'idautoPersonUserNameMV'`
