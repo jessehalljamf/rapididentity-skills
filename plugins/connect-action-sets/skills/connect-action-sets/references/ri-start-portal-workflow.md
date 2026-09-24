@@ -174,7 +174,6 @@ use `startTask` when proxying a browser-initiated request through the RESTPoint 
 
 ## Source
 
-Confirmed from `AltActionExampleCertify.xml` (Alternate Action — certifies a sponsored
-account by submitting a GRANT request to a specific WFM entitlement). The `entitlementId`
-`a1b2c3d4-0000-0000-0000-000000000200` in that file is tenant-specific and should not be
-reused; always resolve via a Global variable.
+Confirmed from a real Alternate Action that certifies a sponsored account by submitting a
+GRANT request to a specific WFM entitlement. The `entitlementId` is tenant-specific and
+should not be reused; always resolve via a Global variable.
