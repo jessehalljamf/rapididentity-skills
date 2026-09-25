@@ -93,6 +93,7 @@ Three rules about the indented form:
 | JSON serialise / parse - `toJSON` (out) and `parseJSON`; key ordering, malformed handling | § Serialising structured data / § Parsing JSON |
 | String escapes (`\\`, `\"`, `\n`, `\t`, `\uXXXX`) | § setVariable Expression Compiler Rules |
 | setVariable vs copyRecord — reference vs deep copy, array mutation rule | § setVariable vs copyRecord |
+| **Never write `""` to LDAP/AD — `saveLDAPRecord`/`modifyLDAPRecord`/`saveADRecord`/`modifyADRecord(s)`** | § Never write an empty string to LDAP/AD |
 | Naming (prefixes, camelCase, reserved labels) | § Naming Scheme |
 | **`label` quoting — bare on `section`/`forEach`/`while`/`continue`/`break`, quoted only on `caFnLog`** | § Section Labels |
 | `about` section content (capped Purpose + pseudo-code, one-line change log, what NOT to include) | § about Section |
@@ -422,6 +423,33 @@ built through a string-coercing path fails `percentTotal !== 100` even when the 
 anything other than string concatenation, build it with `createRecord` + `setRecordFieldValue` and
 keep `createRecordFromObject` for the string-map case. (Verified 2026-06-28; see the knowledge-base
 article `rapididentity/connect/connect-library/records-json.md`.)
+
+### Never write an empty string to LDAP/AD — use `undefined`/`null`
+
+`saveLDAPRecord`, `modifyLDAPRecord`, `saveADRecord`, and `modifyADRecord(s)` reject a zero-length
+string on most attribute syntaxes as an **invalid value**, not as "clear this field" — the directory
+returns a constraint-violation result (e.g. LDAP result code 21, invalid attribute syntax) and the
+whole save fails, including every other field in the same write.
+
+This bites hardest on optional pass-through fields: a WFM/portal-form parameter that is absent
+defaults to `""` (e.g. `someParam || ""`) so a downstream `createRecordFromObject`/`setRecordFieldValue`
+call has something to assign, and that `""` rides straight into the record that gets saved. The save
+fails only when a real end-to-end test happens to leave that field blank — it is easy to ship and pass
+review with every optional field populated in testing.
+
+```xml
+<!-- WRONG: an absent optional field becomes "", which fails saveLDAPRecord's syntax check -->
+<arg name="value" value="{mail: record.homeEmail, mobile: record.mobile}"/>
+
+<!-- RIGHT: absent stays absent -- no attribute is written at all -->
+<arg name="value" value="{mail: record.homeEmail || undefined, mobile: record.mobile || undefined}"/>
+```
+
+`undefined` and `null` both avoid the syntax violation (the attribute is simply omitted / cleared);
+prefer `undefined` in a `createRecordFromObject`/`createRecord` seed so the key is absent rather than
+present-with-a-null-value, matching the existing `|| undefined` pattern already used for optional
+date fields. Applies to every optional field feeding any of these four save/modify actions -
+not just the ones your test happened to leave populated.
 
 ---
 
@@ -1532,6 +1560,7 @@ Before delivering any XML:
 | `parseJSON('{}')` / `parseJSON('[]')` to seed an empty container | Never do this — `parseJSON` parses JSON *strings*. Use `createRecord` (object) / `createArray` (array). See § Records & arrays - construction |
 | `setVariable name="rec.field"` to set a Record field | Use `setRecordFieldValue` (`record`/`field`/`value`); `setRecordFieldValues` for multi-valued. Dot notation is for *reading* |
 | `createRecordFromObject` for a Record whose values get compared or added | It stringifies every value — `true` → `"true"` (truthy!), `50` → `"50"` (fails `!== 100`). Build with `createRecord` + `setRecordFieldValue` to keep native types |
+| An optional field defaults to `""` before `saveLDAPRecord`/`modifyLDAPRecord`/`saveADRecord`/`modifyADRecord(s)` | Directory writes reject a zero-length string as invalid syntax and fail the whole save — default absent values to `undefined`/`null` instead (e.g. `record.field || undefined`), never `""`. See § Never write an empty string to LDAP/AD |
 | Bare `&&`, `<`, or `>` in a `value=` expression | Escape as `&amp;&amp;`, `&lt;`, `&gt;` — bare metacharacters make the XML ill-formed before the JS compiler runs |
 | `setVariable` to copy a Record or extract from results array | Use `copyRecord` — `setVariable` aliases, not copies; mutation on one affects both. Applies to snapshots, `results[0]` extraction, and loop guards |
 | `setVariable` to copy an array before removing items in a loop | Use `copyArray` — same alias problem; mutating the array being iterated breaks `forEach` |
