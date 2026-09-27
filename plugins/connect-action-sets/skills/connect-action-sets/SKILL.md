@@ -713,10 +713,15 @@ an order of precedence — no single signal is reliable by itself:
    edited the action set directly in the Connect UI without updating `Version:`) — `Version:` alone
    can't be trusted. Diff the two bodies instead, ignoring the `about` section's `Author`/`Last
    Modified by`/`Version` lines and pure platform metadata (`modifiedMs`, `modifiedBy`,
-   `modifiedByName`, the deployment `version` counter). If your environment already exposes a
-   semantic/pseudocode-level diff tool for Connect action sets, prefer it — a naive text diff on
-   minified single-line XML flags attribute-order and whitespace noise as false changes. Otherwise,
-   run `scripts/compare_action_sets.py` (bundled with this skill) against the two bodies.
+   `modifiedByName`, the deployment `version` counter). In order of preference:
+   1. A semantic/pseudocode-level diff tool for Connect action sets already in your environment —
+      a naive text diff on minified single-line XML flags attribute-order and whitespace noise as
+      false changes.
+   2. `scripts/compare_action_sets.py` (bundled with this skill), if you can execute it here.
+   3. If you can't execute bundled scripts in this environment either, but a human is in the loop:
+      give them the exact command and ask them to run it and share the output back to you.
+   4. Otherwise, diff the two bodies yourself by reading them directly — the same things to ignore
+      still apply (Author/Last Modified by/Version lines, platform metadata).
    - Diff empty → the copies are identical in substance; it doesn't matter which is "newer."
    - Diff non-empty → `Version:` is stale on at least one copy. Don't guess which is authoritative —
      surface the diff and ask.
