@@ -3,3 +3,4 @@ archive/
 scripts/build.ps1
 __pycache__/
 CLAUDE.local.md
+TODO.md
