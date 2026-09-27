@@ -1,4 +1,4 @@
-# jamf-identity-plugins — RapidIdentity Claude Skills
+# rapididentity-skills — RapidIdentity Claude Skills
 
 A Claude plugin **marketplace** for RapidIdentity work, containing three plugins (one skill
 each):
@@ -31,7 +31,7 @@ claude plugin marketplace add jessehalljamf/rapididentity-skills
 ```
 
 Then install any or all of: `connect-action-sets`, `rapididentity-workflows`, `generate-mr`
-(via `/plugin` or `claude plugin install <name>@jamf-identity-plugins`).
+(via `/plugin` or `claude plugin install <name>@rapididentity-skills`).
 
 Skills are namespaced by plugin: `/connect-action-sets:connect-action-sets`,
 `/rapididentity-workflows:rapididentity-workflows`, `/generate-mr:generate-mr`. Model
