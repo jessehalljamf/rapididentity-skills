@@ -172,11 +172,14 @@ With a regex pattern this is a match test, not literal equality.
 
 **Inline-JS temptation:** `str.split('x').join('y')` or `str.replace('x','y')`
 
+**Arg is `pattern`, not `match`** — verified against `references/connect-builtin-actions.json`.
+`pattern` may be a literal `"string"` or a `/regex/` literal.
+
 **XML:**
 ```xml
 <action id="UUID" name="stringReplaceAll" outputVar="result" disabled="false">
   <arg name="string" value="str"/>
-  <arg name="match" value="&quot;x&quot;"/>
+  <arg name="pattern" value="&quot;x&quot;"/>
   <arg name="replacement" value="&quot;y&quot;"/>
 </action>
 ```
@@ -185,7 +188,7 @@ With a regex pattern this is a match test, not literal equality.
 ```json
 {"id":"UUID","name":"stringReplaceAll","outputVar":"result","args":[
   {"name":"string","value":"str"},
-  {"name":"match","value":"\"x\""},
+  {"name":"pattern","value":"\"x\""},
   {"name":"replacement","value":"\"y\""}
 ]}
 ```
@@ -1031,18 +1034,24 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 
 ## Dates
 
+Full behavioral background (Java `Date` object typing, the `toJSON`/`parseJSON` gotcha) is in
+SKILL.md § Date/Time Actions. This section is call-syntax lookup only.
+
 ### `now` / `today` / `parseDate` / `formatDate`
+
+**Inline-JS temptation:** `new Date()` or `Date.now()` — don't; `now()` returns a **`Date` object**,
+not epoch milliseconds. `typeof now()` is `"object"`. Confirmed live 2026-09-27.
 
 **XML:**
 ```xml
-<!-- current epoch ms — use inline -->
+<!-- current date/time as a Date object — use inline -->
 <arg name="value" value="now()"/>
 
 <action id="UUID" name="today" outputVar="d" disabled="false">
   <arg name="timezone" value="Global.localTimeZone"/>
 </action>
 <action id="UUID" name="parseDate" outputVar="d" disabled="false">
-  <arg name="date" value="str"/>
+  <arg name="dateString" value="str"/>
   <arg name="pattern" value="&quot;yyyy-MM-dd&quot;"/>
 </action>
 <action id="UUID" name="formatDate" outputVar="str" disabled="false">
@@ -1060,7 +1069,7 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 ```
 ```json
 {"id":"UUID","name":"parseDate","outputVar":"d","args":[
-  {"name":"date","value":"str"},
+  {"name":"dateString","value":"str"},
   {"name":"pattern","value":"\"yyyy-MM-dd\""}
 ]}
 ```
@@ -1072,17 +1081,21 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 ]}
 ```
 
-`today(tz)` returns a UTC Date whose instant corresponds to local midnight in that zone.
+`today(tz)` returns a UTC Date whose instant corresponds to local midnight in that zone. `timezone`
+and `locale` are optional on all four actions (default: server timezone/locale).
 
 ---
 
 ### `adjustDate` / `truncateDate`
 
+**Arg is `offset`, not `amount`** — verified against `references/connect-builtin-actions.json` and
+confirmed live 2026-09-27 (this cheatsheet had `amount` wrong until 2026-09-27).
+
 **XML:**
 ```xml
 <action id="UUID" name="adjustDate" outputVar="d" disabled="false">
   <arg name="date" value="d"/>
-  <arg name="amount" value="-1"/>
+  <arg name="offset" value="-1"/>
   <arg name="unit" value="&quot;day&quot;"/>
 </action>
 <action id="UUID" name="truncateDate" outputVar="d" disabled="false">
@@ -1095,7 +1108,7 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 ```json
 {"id":"UUID","name":"adjustDate","outputVar":"d","args":[
   {"name":"date","value":"d"},
-  {"name":"amount","value":"-1"},
+  {"name":"offset","value":"-1"},
   {"name":"unit","value":"\"day\""}
 ]}
 ```
@@ -1106,7 +1119,9 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 ]}
 ```
 
-`unit` values: `day`, `month`, `year`.
+`adjustDate` `unit` values: `year`, `month`, `week`, `day`, `hour`, `minute`, `second`, `millisecond`.
+`truncateDate` `unit` values: `year`, `month`, `week`, `day`, `hour`, `minute`, `second` — no
+`millisecond` (already the finest unit a `Date` tracks). `timezone`/`locale` optional on both.
 
 ---
 
@@ -1117,6 +1132,9 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
 <action id="UUID" name="dateFromFILETIME" outputVar="d" disabled="false">
   <arg name="filetime" value="filetimeVal"/>
 </action>
+<action id="UUID" name="dateToFILETIME" outputVar="filetimeVal" disabled="false">
+  <arg name="date" value="d"/>
+</action>
 ```
 
 **MCP JSON:**
@@ -1125,6 +1143,41 @@ Also callable inline: `toJSON(obj)` or `toJSON(obj, true)` in any `value=` expre
   {"name":"filetime","value":"filetimeVal"}
 ]}
 ```
+```json
+{"id":"UUID","name":"dateToFILETIME","outputVar":"filetimeVal","args":[
+  {"name":"date","value":"d"}
+]}
+```
+
+Windows FILETIME is 100-nanosecond ticks since 1601-01-01 — useful when reading a raw AD attribute
+(e.g. `lastLogonTimestamp`, `pwdLastSet`) directly rather than a pre-converted metadirectory attribute.
+
+---
+
+### `getFileTimestamp`
+
+**Inline-JS temptation:** parsing a date out of a Connect-managed file's own name (e.g. an
+exported/archived file with a date embedded in the filename) — prefer the filesystem's own
+timestamp, which doesn't depend on a naming convention staying consistent.
+
+**XML:**
+```xml
+<action id="UUID" name="getFileTimestamp" outputVar="fileTs" disabled="false">
+  <arg name="path" value="filePath"/>
+</action>
+```
+
+**MCP JSON:**
+```json
+{"id":"UUID","name":"getFileTimestamp","outputVar":"fileTs","args":[
+  {"name":"path","value":"filePath"}
+]}
+```
+
+Returns a `Date` object (confirmed live 2026-09-27 — same object type as `now()`/`today()`, usable
+directly by `formatDate`); returns `undefined` if the file doesn't exist or on I/O error. Optional
+`filesystem` arg targets a remote filesystem defined by `defineRemoteFilesystem` instead of the
+Connect server's own managed files.
 
 ---
 

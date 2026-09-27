@@ -108,6 +108,8 @@ Three rules about the indented form:
 | **Seeding an empty object or array — `createRecord` / `createArray`, never `parseJSON('{}')` / `parseJSON('[]')`** | § Records & arrays - construction |
 | **Setting a Record field — `setRecordFieldValue`, never a dotted `setVariable`; plus type preservation** | § Records & arrays - construction |
 | String & record built-in actions (split, contains, equals, pad, record fields) | § String & Record Built-in Actions |
+| **Builtins that return a Java String, not a JS string — `.length` silently breaks** (`getFileName`, `loadFileAsString`) | § Java String vs JS String Coercion |
+| **Date/time math and formatting — `formatDate`/`parseDate`/`adjustDate`/`truncateDate`/FILETIME conversion/`getFileTimestamp`, never inline JS `Date`** | § Date/Time Actions |
 | Calling other action sets (function mode) | § Function Mode Pattern |
 | Community Adapter (ca) authoring — naming, sessions, dependencies, param order | § Community Adapter (ca) Action Set Authoring |
 | **Fast task → builtin lookup** (strings, arrays, records, dates, DNs, crypto, connections) | `references/native-action-cheatsheet.md` |
@@ -1215,6 +1217,8 @@ returns what you just logged, not the original platform error — capture the pl
 
 Connect ships built-in actions for common string, array, record, and JSON operations. **Prefer these over inline JS.** Full call syntax for every builtin is in `references/native-action-cheatsheet.md`.
 
+**These tables are hand-written summaries, not the authoritative source.** `references/connect-builtin-actions.json` is the platform's own action catalog — the exact argDef names, straight from the registry. A wrong arg name here can still pass `xmllint`/`connect_fmt_validate` clean (nothing local checks builtin arg names) and fail only at run time with `Missing required property '<action>.<arg>'`. Verify against the JSON catalog before relying on an arg name for a builtin you haven't used before, especially a less-common one.
+
 ### String actions
 
 | Action | Key args | Notes |
@@ -1226,7 +1230,7 @@ Connect ships built-in actions for common string, array, record, and JSON operat
 | `stringToUpper` / `stringToLower` | `string` | Case conversion. |
 | `stringLength` | `string` | Returns integer length. |
 | `stringRepeat` | `text`, `count` | Returns `text` repeated `count` times. |
-| `stringReplaceAll` | `string`, `match`, `replacement`, `ignoreCase` | Replace all occurrences. |
+| `stringReplaceAll` | `string`, `pattern`, `replacement`, `ignoreCase` | Replace all occurrences. `pattern` may be a literal `"string"` **or** a `/regex/` literal — not regex-only. |
 | `stringReplaceFirst` | same | Replace first occurrence only. |
 | `subString` | `string`, `startIndex`, `length` | Extract substring. |
 | `stringFromTemplate` | `format`, `args` | `%field%` or `%index%` substitution from a record or array. |
@@ -1283,6 +1287,78 @@ JS string methods (`.padStart()`, `.padEnd()`, `.trim()`, etc.) also work inline
 
 Prefer these over `JSON.parse` / `JSON.stringify`. Record keys serialise alphabetically; plain and `parseJSON`-seeded objects keep insertion order. `"" + record` yields a Java map string — always use `toJSON(record)`.
 
+---
+
+## Java String vs JS String Coercion
+
+Some Connect built-in actions return a **Java String** (`java.lang.String`, wrapped by the Rhino
+JS engine) instead of a genuine JS string. `typeof` reports `"object"`, not `"string"` — and the
+specific trap is `.length`: it resolves to the Java `length()` **method object**, not a number. A
+guard built on it (`name.length > 4`) is silently `false`, with no error anywhere in the log.
+
+**Confirmed live** (sandbox test, 2026-09-27) for `getFileName` and `loadFileAsString`: both return
+an object whose `.length` is a function, not an integer. Every other string operation
+(`lastIndexOf`, `toLowerCase`, `substring`, concatenation) works normally on the value — it is
+specifically `.length` that breaks silently. **Not affected:** `listFiles` returns a genuine JS
+array of genuine JS strings (`Array.isArray` true, element `typeof` is `"string"`) — no coercion
+needed for its elements.
+
+Coerce once at the boundary, immediately after the call:
+
+```xml
+<action name="loadFileAsString" outputVar="fileContent">
+  <arg name="path" value="filePath"/>
+</action>
+<action name="setVariable">
+  <arg name="name" value="fileContent"/>
+  <arg name="value" value="&quot;&quot; + fileContent"/>
+</action>
+```
+
+or inline at the point of use: `("" + getFileName(path)).length`. Treat any file/IO builtin whose
+return value feeds a `.length` check or arithmetic as a suspect until you've verified it — coerce
+with `("" + x)` rather than assuming a given builtin is safe.
+
+---
+
+## Date/Time Actions
+
+Connect represents a date as a **`Date` object** — a `java.util.Date` that Rhino exposes with
+JS-`Date`-like method access (`.getTime()` works; string concatenation renders the familiar
+`Sun Sep 27 2026 14:19:16 GMT-0000 (GMT)` form). **`typeof` on it is `"object"`, not `"number"`.**
+Never build or manipulate a date with inline JS (`new Date()`, `Date.now()`, `+`/`-` arithmetic on
+it) — use the native actions below. They are also the only place timezone/locale handling and
+FILETIME conversion are correct.
+
+| Action | Key args | Notes |
+|---|---|---|
+| `now` | — (callable inline: `now()`) | Current date/time as a **`Date` object**, not epoch milliseconds. Confirmed live 2026-09-27. |
+| `today` | `timezone?` | Current date as a `Date` object truncated to local midnight in `timezone` — but the `Date` itself is always the UTC instant for that midnight, so logging it directly will not show `00:00:00`. |
+| `formatDate` | `date`, `pattern`, `timezone?`, `locale?` | `Date` object → formatted string. `pattern` is a Java `SimpleDateFormat` pattern (e.g. `"yyyy-MM-dd HH:mm:ss"`). Fails if `date` is not a `Date` object — a raw number or string is rejected. |
+| `parseDate` | `dateString`, `pattern`, `timezone?`, `locale?` | Formatted string → `Date` object. Same `pattern` syntax as `formatDate`. |
+| `adjustDate` | `date`, `offset`, `unit`, `timezone?`, `locale?` | Add/subtract from a `Date`. `unit`: `year`\|`month`\|`week`\|`day`\|`hour`\|`minute`\|`second`\|`millisecond`. `offset` is signed (negative subtracts). Confirmed live: the arg is `offset`, not `amount`. |
+| `truncateDate` | `date`, `unit`, `timezone?`, `locale?` | Zero out everything below `unit`. `unit`: `year`\|`month`\|`week`\|`day`\|`hour`\|`minute`\|`second` — no `millisecond` (already the finest unit a `Date` tracks). |
+| `dateFromFILETIME` | `filetime` | Windows FILETIME (100-ns ticks since 1601-01-01) → `Date` object. Useful when reading a raw AD attribute like `lastLogonTimestamp`/`pwdLastSet` directly instead of a pre-converted metadirectory attribute. |
+| `dateToFILETIME` | `date` | `Date` object → Windows FILETIME. |
+| `getFileTimestamp` | `filesystem?`, `path` | Last-modified time of a file as a `Date` object; `undefined` if the file doesn't exist or on I/O error. **Prefer this over parsing a date out of a Connect-managed file's name** (e.g. an exported/archived file with a date embedded in the filename) — the filesystem's own timestamp doesn't depend on a naming convention staying consistent. |
+
+### `toJSON`/`parseJSON` and `Date` objects
+
+`toJSON` auto-coerces a `Date` object to an ISO 8601 string. `parseJSON` does **not** reverse
+this — a parsed ISO string stays a string. Re-hydrate it explicitly with `parseDate` (never
+`new Date(str)`) if you need a real `Date` object back:
+
+```xml
+<action name="parseDate" outputVar="createdDate">
+  <arg name="dateString" value="parsed.createdDate"/>
+  <arg name="pattern" value="&quot;yyyy-MM-dd'T'HH:mm:ss.SSS'Z'&quot;"/>
+  <arg name="timezone" value="&quot;UTC&quot;"/>
+</action>
+```
+
+Full call syntax and MCP JSON for every action above is in `references/native-action-cheatsheet.md` § Dates.
+
+---
 
 ## Function Mode Pattern
 
@@ -1444,7 +1520,7 @@ For non-Community-Adapter action sets, use `FnOpenConns` (`ref_SharedLibrary`) a
 
 Only **closeable** connection/IO actions are closed with `<action name="close"><arg name="closeable" value="session"/></action>`. OAuth2 / HTTP Basic connections (Microsoft Graph, Google OAuth) hold a token, not a handle, and are **not** closed.
 
-**Full per-system details — `FnOpenConns` Global key requirements, built-in connection args, `getLDAPRecords` `baseDn`/`attributes` selection, the AES sequence, failure handling, and closing — are in `references/connections.md`. Read it before authoring any connection logic. Fast calling-pattern lookup: `references/native-action-cheatsheet.md` § Connections.**
+**Full per-system details — `FnOpenConns` Global key requirements, built-in connection args, `getLDAPRecords` `baseDn`/`attributes` selection, `extraProperties` keys by action (AD, LDAP, Database, AD Home Directory, Remote Filesystem), the AES sequence, failure handling, and closing — are in `references/connections.md`. Read it before authoring any connection logic. Fast calling-pattern lookup: `references/native-action-cheatsheet.md` § Connections.**
 
 ---
 ## Auditing — logAuditEvent
@@ -1611,6 +1687,7 @@ Before delivering any XML:
 
 | Pitfall | Fix |
 |---|---|
+| `stringReplaceAll`/`stringReplaceFirst` called with a `match` arg | Wrong — the platform arg is `pattern` (literal string or `/regex/`). Passes `xmllint`/`connect_fmt_validate` clean; fails only at run time with `Missing required property 'stringReplaceAll.pattern'`. This skill's own tables and cheatsheet had this wrong until 2026-09-27 — when unsure of a builtin's exact arg name, check `references/connect-builtin-actions.json` |
 | Section label `return` | Rename to `returnSuccess`, `returnRecord`, etc. |
 | `&quot;quoted&quot;` value on `section`/`forEach`/`while`/`continue`/`break`'s `label` arg | Write the bare identifier — `label` is `type="name"` on these, not an expression. The validator does not catch this (it exempts `label` from expression checking), so it passes clean while the label literally contains quote characters. `caFnLog`'s `label` is the one exception — that one IS `type="string"` and does get quoted. See § Section Labels |
 | Hardcoded base DNs or hostnames | Use `Global.*` references |
@@ -1653,6 +1730,9 @@ Before delivering any XML:
 | Expecting a failed built-in to throw | Built-ins never throw — they return `undefined`/`false` and set `lastErrorMessage`/`lastErrorCode`. Check return values; see § Built-in failure model |
 | Reading `getLastErrorMessage()` after an ERROR-level `log` | `log level="ERROR"` clears and **overwrites** `lastErrorMessage` with your own message — capture the platform error into a variable *before* logging it |
 | `loadFileAsString` producing mangled accented characters | Its default encoding is **LATIN1 (ISO-8859-1), not UTF-8** — pass the encoding arg explicitly for UTF-8 files; `saveToFile` defaults also differ by type (UTF-8 for XML, ISO-8859-1 for strings) |
+| `getFileName`/`loadFileAsString` result's `.length` used in a guard | Both return a **Java String** — `.length` is a method object, not a number, and the guard silently evaluates false. Coerce first: `("" + x).length`. See § Java String vs JS String Coercion |
+| Inline `new Date()`, `Date.now()`, or `+`/`-` arithmetic on a Connect `Date` | Connect's `Date` is a `java.util.Date`; `typeof` is `"object"`, not `"number"`, and `formatDate`/`adjustDate` reject a non-`Date` value. Use `now`/`today`/`adjustDate`/`truncateDate`. See § Date/Time Actions |
+| `adjustDate` called with an `amount` arg | Wrong — the platform arg is `offset`. This skill's cheatsheet had this wrong until 2026-09-27. See § Date/Time Actions |
 | Treating `getIdautoIDForUser`/`getIdautoIDForGroup` as read-only lookups | They **create the idautoID if missing** — calling one on the wrong DN mints a new immutable ID; not safe as an existence probe |
 | `copyArray` as a snapshot of an array of Records | `copyArray` is **shallow** — the Records inside are still shared; mutating them mutates the "snapshot". `copyRecord` each element |
 | Concatenating raw values into an LDAP filter | Use `stringEscape` with `escapeType="ldap-filter"` (or `ldap-dn` for DN parts) — unescaped `( ) * \` in user data breaks or injects into the filter |
@@ -1908,7 +1988,7 @@ Always-on lookups:
 - `references/openldap-schema.md` — Full RI OpenLDAP schema: all `idautoPerson` and `idautoGroup` attributes with cardinality (single/multi) and type. **Always consult this before referencing any LDAP attribute** — it determines whether `[].concat()` is needed and which `baseDn` Global to use.
 
 Load-when-relevant (these were split out of SKILL.md to keep it lean):
-- `references/connections.md` — Per-system connection details: AD, RI Metadirectory (incl. `getLDAPRecords` `baseDn`/`attributes` selection), Portal, Google + `callGoogleAPI`, Microsoft 365, Database, the AES Community Adapter encrypt/decrypt sequence, failure handling, and closing. **Read before authoring any connection logic.**
+- `references/connections.md` — Per-system connection details: AD, RI Metadirectory (incl. `getLDAPRecords` `baseDn`/`attributes` selection), Portal, Google + `callGoogleAPI`, Microsoft 365, Database, `extraProperties` keys by action, the AES Community Adapter encrypt/decrypt sequence, failure handling, and closing. **Read before authoring any connection logic.**
 - `references/mcp-and-json.md` — MCP workflow (read/explore, design, push, delete), the JSON object model (file JSON vs API JSON, argDef/action/arg shapes), and field-by-field XML ↔ JSON conversion. **Read when working against a live instance via the MCP or converting formats.**
 - `references/ri-sponsorship-api.md` — RI Sponsorship API endpoints, create-account request body, and custom-attribute UUID resolution. **Read only for sponsored-account work.**
 - `references/ri-start-portal-workflow.md` — `startPortalWorkflow` built-in action: signature, required portal session, `entitlementId` lookup, `formData` Record prep, and a full skeleton. **Read when submitting a WFM request programmatically from Connect (e.g. an Alternate Action or scheduled job).**

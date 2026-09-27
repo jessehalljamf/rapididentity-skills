@@ -4,6 +4,7 @@ Typed connection actions for each target system. Always store the result in `out
 
 ## Contents
 - Active Directory, RapidIdentity Metadirectory, Portal, Google (+ callGoogleAPI), Microsoft 365, Database
+- `extraProperties` keys by action (AD, LDAP, Database, AD Home Directory, Remote Filesystem)
 - AES Community Adapter (encrypt/decrypt)
 - Connection failure handling and closing connections
 
@@ -207,6 +208,45 @@ Microsoft 365 has no built-in connection action. Obtain a bearer token manually:
 
 - Requires a bridge resolved via `getIdBridgeConnectInfo`.
 - Connection string is built from `Global.dbConnStringTemplate` using `stringFromTemplate`.
+
+### `extraProperties` — connection-tuning keys by action
+
+Seven built-in actions accept an optional `extraProperties` argument — an object or Record of
+secondary configuration keys layered onto the primary connection args. `extraProperties` accepts
+either a plain JS object literal or a Record; Connect normalizes either to a Record internally.
+The valid keys are entirely action-specific — there is no shared schema across actions.
+
+| Action | `extraProperties` keys | Notes |
+|---|---|---|
+| `openADConnection` | `followReferrals` (boolean) | Set `false` to stop the LDAP client auto-following referrals across domain/forest boundaries. Used in the example above. |
+| `openLDAPConnection` | `followReferrals` (boolean) | Same key, for a generic (non-metadirectory, non-AD) LDAP connection. |
+| `openDatabaseConnection` | Any Hibernate connection property — e.g. `socketTimeout`, `hibernate.connection.pool_size`, `hibernate.show_sql`, `hibernate.default_schema` | Passed straight through to Hibernate. Values are typically strings even for numeric settings (e.g. `"9000"`, not `9000`) — check the target driver's docs for the exact key and value type it expects. Used in the example above. |
+| `createADHomeDirectory` / `deleteADHomeDirectory` / `moveADHomeDirectory` | `jcifs.smb.client.username`, `jcifs.smb.client.password` (and other `jcifs.*` keys) | These three configure the **SMB/jCIFS file-share connection** used internally to manage the home directory — not the AD LDAP connection. Override the username/password here when the home-directory share needs different credentials than the AD bind account. |
+| `defineRemoteFilesystem` | Protocol-specific — see below | The richest `extraProperties` surface of the seven; valid keys vary by `protocol`. |
+
+**`defineRemoteFilesystem` keys by protocol:**
+
+| Protocol | Keys |
+|---|---|
+| SFTP | `sftp.privateKey` (PEM key content, required for key-based auth), `sftp.publicKey` (optional), `sftp.passPhrase` (optional, if the private key is encrypted), `disableDetectExec` (boolean) |
+| SMB/CIFS | Any `jcifs.*`-prefixed key, passed straight through to jCIFS-ng |
+| FTPS | `ftpsTrustAll`, `ftpsTrustSelfSigned`, `ftpsImplicitMode`, `ftpsProtC`/`ftpsProtS`/`ftpsProtE` (booleans) |
+| All protocols | `connectTimeout`, `socketTimeout`, `dataTimeout` (milliseconds), `userDirIsRoot` (boolean) |
+
+```xml
+<!-- SFTP with a private key, no password -->
+<action name="defineRemoteFilesystem" outputVar="remoteFS">
+  <arg name="protocol" value="&quot;sftp&quot;"/>
+  <arg name="host" value="Global.sftpHost"/>
+  <arg name="port" value="22"/>
+  <arg name="user" value="Global.sftpUser"/>
+  <arg name="basePath" value="&quot;/&quot;"/>
+  <arg name="extraProperties" value="{&quot;sftp.privateKey&quot;: privateKey}"/>
+</action>
+```
+
+`extraProperties` is always `optional="true"` — omit it entirely rather than passing an empty
+object when a connection needs no tuning.
 
 ### AES Community Adapter — encryption / decryption
 
